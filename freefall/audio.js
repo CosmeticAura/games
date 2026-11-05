@@ -1,7 +1,8 @@
 // All sounds are made here with Web Audio. No samples, nothing to download. See SOUNDS.md.
 // The context starts on the first tap (iOS needs that).
+import { SOUND_PACKS } from '../shared/themes.js';
 export class Sfx {
-  constructor() { this.ctx = null; this.vol = 0.7; this.muted = false; this.coinN = 0; }
+  constructor() { this.ctx = null; this.vol = 0.7; this.muted = false; this.coinN = 0; this.packName = 'classic'; }
   init() {
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
@@ -22,7 +23,8 @@ export class Sfx {
     const lfo = c.createOscillator(), lg = c.createGain(); lfo.frequency.value = 0.7; lg.gain.value = 60;
     lfo.connect(lg); lg.connect(this.wWhoosh.fl.frequency); lfo.start();
   }
-  level() { return this.muted ? 0 : this.vol; }
+  level() { return this.muted ? 0 : this.vol * ((SOUND_PACKS[this.packName] || {}).gain ?? 1); }
+  setPack(n) { this.packName = SOUND_PACKS[n] ? n : 'classic'; this.apply(); }
   apply() { if (this.master) this.master.gain.setTargetAtTime(this.level(), this.ctx.currentTime, 0.04); }
   setVolume(v) { this.vol = Math.max(0, Math.min(1, v)); this.apply(); }
   setMuted(m) { this.muted = !!m; this.apply(); }
@@ -45,10 +47,10 @@ export class Sfx {
     const g = c.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     s.connect(f); f.connect(g); g.connect(this.master); s.start(t, Math.random()); s.stop(t + dur + 0.05);
   }
-  tone(freq, dur, vol, slideTo = null, delay = 0, type = 'sine') {
+  tone(freq, dur, vol, slideTo = null, delay = 0, type = null) {
     const c = this.ctx, t = c.currentTime + delay;
     const o = c.createOscillator(), g = c.createGain();
-    o.type = type; o.frequency.setValueAtTime(freq, t); if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    o.type = type || (this.packName === 'arcade' ? 'square' : 'sine'); o.frequency.setValueAtTime(freq, t); if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
     g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.006); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     o.connect(g); g.connect(this.master); o.start(t); o.stop(t + dur + 0.05);
   }
@@ -59,7 +61,7 @@ export class Sfx {
     this.tone(95, 0.45, 0.6 * v, 28);
     for (let i = 0; i < 9; i++) this.burst('bandpass', 300 + Math.random() * 2700, 0.05 + Math.random() * 0.07, (0.25 + Math.random() * 0.25) * v, 1.5, Math.random() * 0.2);
   }
-  coin(i = 0) { if (!this.ok) return; const f = 1318 * Math.pow(2, ((i % 12) / 12)); this.tone(f, 0.05, 0.07, null, 0, 'sine'); this.tone(f * 2, 0.04, 0.03); }
+  coin(i = 0) { if (!this.ok) return; const f = 1318 * Math.pow(2, ((i % 12) / 12)); this.tone(f, 0.05, 0.07); this.tone(f * 2, 0.04, 0.03); }
   cheer() {
     if (!this.ok) return;
     const c = this.ctx, t = c.currentTime;

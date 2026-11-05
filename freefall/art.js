@@ -240,9 +240,18 @@ export function drawTrail(ctx, look, x, y, u, t, dir = 1) {
 }
 
 // ---------- stamp ----------
-export function drawStamp(ctx, x, y, text, sub, alpha = 1, scale = 1) {
+export function drawStamp(ctx, x, y, text, sub, alpha = 1, scale = 1, style = 'seal', color = null) {
   ctx.save(); ctx.translate(x, y); ctx.rotate(-0.1); ctx.scale(scale, scale); ctx.globalAlpha = alpha;
-  const g = col('green');
+  const g = color || col('green');
+  if (style === 'wax' || style === 'star') {
+    ctx.fillStyle = style === 'wax' ? PAL.red : g; ctx.strokeStyle = PAL.ink; ctx.lineWidth = 2; ctx.beginPath();
+    if (style === 'wax') ctx.arc(0, 0, 19, 0, Math.PI * 2);
+    else for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? 11 : 22; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = style === 'wax' ? PAL.cream : PAL.ink; ctx.font = `700 12px ${SYS}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, 0, 1);
+    if (sub) { ctx.rotate(0.1); ctx.font = `700 11px ${SYS}`; ctx.fillStyle = PAL.cream; ctx.fillText(sub, 0, 34); }
+    ctx.restore(); return;
+  }
   ctx.font = `22px ${DISPLAY}`; const w = Math.max(54, ctx.measureText(text).width + 22), h = 30;
   ctx.fillStyle = 'rgba(20,22,26,0.82)'; ctx.fillRect(-w / 2, -h / 2, w, h);
   ctx.strokeStyle = g; ctx.lineWidth = 2; ctx.strokeRect(-w / 2, -h / 2, w, h); ctx.lineWidth = 1; ctx.strokeRect(-w / 2 + 3, -h / 2 + 3, w - 6, h - 6);

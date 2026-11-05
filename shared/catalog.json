@@ -1,0 +1,322 @@
+{
+ "v": 1,
+ "labels": {
+  "theme": "Themes",
+  "weather": "Weather",
+  "sky": "Sky",
+  "glow": "Ground glow",
+  "altimeter": "Altimeter",
+  "numstyle": "Numbers",
+  "trim": "Panel trim",
+  "sound": "Sounds",
+  "stamp": "Stamps"
+ },
+ "categories": {
+  "theme": [
+   {
+    "id": "theme_ink",
+    "name": "Ink night",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "theme_cockpit",
+    "name": "Cockpit dusk",
+    "price": 12000,
+    "tier": "Rare"
+   },
+   {
+    "id": "theme_print",
+    "name": "Two-ink print",
+    "price": 12000,
+    "tier": "Rare"
+   },
+   {
+    "id": "theme_snow",
+    "name": "Snow peak",
+    "price": 18000,
+    "tier": "Rare"
+   },
+   {
+    "id": "theme_desert",
+    "name": "Desert noon",
+    "price": 18000,
+    "tier": "Rare"
+   },
+   {
+    "id": "theme_harbor",
+    "name": "Harbor fog",
+    "price": 18000,
+    "tier": "Rare"
+   },
+   {
+    "id": "theme_storm",
+    "name": "Storm",
+    "price": 40000,
+    "tier": "Epic"
+   },
+   {
+    "id": "theme_temple",
+    "name": "Autumn temple",
+    "price": 45000,
+    "tier": "Epic"
+   },
+   {
+    "id": "theme_deepsea",
+    "name": "Deep sea",
+    "price": 45000,
+    "tier": "Epic"
+   },
+   {
+    "id": "theme_lantern",
+    "name": "Lantern festival",
+    "price": 60000,
+    "tier": "Epic"
+   },
+   {
+    "id": "theme_golden",
+    "name": "Golden hour",
+    "price": 400000,
+    "tier": "Mythic"
+   }
+  ],
+  "weather": [
+   {
+    "id": "weather_auto",
+    "name": "Theme's own",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "weather_rain",
+    "name": "Rain",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "weather_snow",
+    "name": "Snow",
+    "price": 2500,
+    "tier": "Common"
+   },
+   {
+    "id": "weather_fireflies",
+    "name": "Fireflies",
+    "price": 4000,
+    "tier": "Common"
+   },
+   {
+    "id": "weather_ash",
+    "name": "Ash",
+    "price": 6000,
+    "tier": "Common"
+   },
+   {
+    "id": "weather_none",
+    "name": "Clear air",
+    "price": 2500,
+    "tier": "Common"
+   }
+  ],
+  "sky": [
+   {
+    "id": "sky_auto",
+    "name": "Theme's own",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "sky_moon",
+    "name": "Moon",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "sky_sun",
+    "name": "Sun",
+    "price": 2500,
+    "tier": "Common"
+   },
+   {
+    "id": "sky_none",
+    "name": "Nothing",
+    "price": 2500,
+    "tier": "Common"
+   }
+  ],
+  "glow": [
+   {
+    "id": "glow_auto",
+    "name": "Theme's own",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "glow_red",
+    "name": "Red",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "glow_amber",
+    "name": "Amber",
+    "price": 2000,
+    "tier": "Common"
+   },
+   {
+    "id": "glow_jade",
+    "name": "Jade",
+    "price": 2000,
+    "tier": "Common"
+   },
+   {
+    "id": "glow_blue",
+    "name": "Cool blue",
+    "price": 2000,
+    "tier": "Common"
+   },
+   {
+    "id": "glow_white",
+    "name": "White",
+    "price": 2000,
+    "tier": "Common"
+   }
+  ],
+  "altimeter": [
+   {
+    "id": "altimeter_auto",
+    "name": "Theme's own",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "altimeter_ruler",
+    "name": "Ruler",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "altimeter_dial",
+    "name": "Round dial",
+    "price": 5000,
+    "tier": "Common"
+   },
+   {
+    "id": "altimeter_tape",
+    "name": "Tape",
+    "price": 5000,
+    "tier": "Common"
+   }
+  ],
+  "numstyle": [
+   {
+    "id": "numstyle_auto",
+    "name": "Theme's own",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "numstyle_brush",
+    "name": "Brush serif",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "numstyle_mono",
+    "name": "Mono",
+    "price": 3000,
+    "tier": "Common"
+   },
+   {
+    "id": "numstyle_block",
+    "name": "Block",
+    "price": 3000,
+    "tier": "Common"
+   }
+  ],
+  "trim": [
+   {
+    "id": "trim_auto",
+    "name": "Theme's own",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "trim_gold",
+    "name": "Gold",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "trim_jade",
+    "name": "Jade",
+    "price": 2500,
+    "tier": "Common"
+   },
+   {
+    "id": "trim_silver",
+    "name": "Silver",
+    "price": 2500,
+    "tier": "Common"
+   },
+   {
+    "id": "trim_lacquer",
+    "name": "Red lacquer",
+    "price": 2500,
+    "tier": "Common"
+   },
+   {
+    "id": "trim_iron",
+    "name": "Black iron",
+    "price": 2500,
+    "tier": "Common"
+   }
+  ],
+  "sound": [
+   {
+    "id": "sound_classic",
+    "name": "Classic",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "sound_quiet",
+    "name": "Quiet",
+    "price": 10000,
+    "tier": "Rare"
+   },
+   {
+    "id": "sound_arcade",
+    "name": "Arcade",
+    "price": 10000,
+    "tier": "Rare"
+   }
+  ],
+  "stamp": [
+   {
+    "id": "stamp_auto",
+    "name": "Theme's own",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "stamp_seal",
+    "name": "Safe seal",
+    "price": 0,
+    "tier": "Free"
+   },
+   {
+    "id": "stamp_wax",
+    "name": "Wax seal",
+    "price": 3000,
+    "tier": "Common"
+   },
+   {
+    "id": "stamp_star",
+    "name": "Star",
+    "price": 3000,
+    "tier": "Common"
+   }
+  ]
+ }
+}
