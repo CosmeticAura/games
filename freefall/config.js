@@ -1,46 +1,69 @@
-// Freefall tuning. Change numbers here, nothing else needs touching.
+// Freefall v4 tuning. Change numbers here, nothing else needs touching.
+// Play tokens only, never real money.
 export const CONFIG = {
-  // jump
-  minHeight: 100,          // m, plane height range (hidden from the player)
+  // jump heights (m). The mix is also what the multiplier is worked out from.
+  minHeight: 100,
   maxHeight: 2500,
-  // multiplier: 1.00x at the jump, +1.00x per 100 m fallen
-  multBase: 1.0,
-  multPerStep: 1.0,
-  metersPerStep: 100,
+  heightMix: [
+    { p: 0.30, lo: 100,  hi: 500  },   // short
+    { p: 0.50, lo: 500,  hi: 1800 },   // medium
+    { p: 0.20, lo: 1800, hi: 2500 },   // long
+  ],
+  repeatBand: 0.10,        // a new height is never within 10% of the last one
+
+  // multiplier = returnShare / (chance a random jump is still in the air at that height fallen)
+  returnShare: 0.92,
+  multCap: 100,            // highest multiplier the game pays
+  multDecimals: 2,
+
   // physics
-  gravity: 80,             // m/s^2 at the start of the fall (v3: fast)
-  terminalSpeed: 220,      // m/s, freefall tops out here (reached smoothly)
-  chuteDecel: 320,         // m/s^2, steady braking once the chute is open (about half a second)
+  gravity: 60,             // m/s^2 at the start of the fall
+  terminalSpeed: 160,      // m/s
+  chuteDecel: 1000,        // m/s^2, the snap when the chute opens
   chuteSpeed: 60,          // m/s, steady descent under the chute
-  safeLanding: 68,         // m/s, land slower than this to win
+  safeLanding: 100,        // m/s, land slower than this and you walk away
+  groundVisibleM: 30,      // the ground only shows this close, about 0.2 s at top speed: too late to react
+
   // bets and tokens
   minBet: 10,
-  startTokens: 10000,
   dailyBonus: 10000,
+  streakExtra: 500,
+  streakExtraMax: 5000,
+  rescueTokens: 1000,      // given when the balance is below the minimum bet
+
   // bots
   botsMin: 4,
   botsMax: 6,
-  botBetMin: 0.02,         // share of your balance
+  botBetMin: 0.02,
   botBetMax: 0.15,
+  botBalance: [2000, 30000],
+  // bots choose how many metres to fall before opening
+  botOpenMix: [
+    { p: 0.50, lo: 100, hi: 450 },
+    { p: 0.40, lo: 450, hi: 1300 },
+    { p: 0.10, lo: 1300, hi: 2000 },
+  ],
+  // some bots watch the altimeter and open this far above the ground instead
+  botAwareShare: 0.03,
+  botAwareAlt: [250, 700],
   botNames: ['Maverick', 'Skye', 'Dash', 'Nova', 'Ripley', 'Blaze', 'Echo', 'Jett', 'Pixel', 'Orion', 'Zuzu', 'Kestrel'],
-  // chance a bot is greedy (opens low) vs safe (opens high)
-  botGreedyShare: 0.5,
-  safeOpenAlt: [130, 260],   // m above ground
-  greedyOpenAlt: [30, 170],
-  // v2: view, drift, feel
-  groundVisibleM: 400,       // v3: ground first shows this many m below you (about 2 s at top speed)
-  viewPxPerM: 0.0036,        // vertical scale: screen height * this = pixels per metre
+
+  // view and feel
+  viewPxPerM: 0.0036,      // screen height * this = pixels per metre
   xStretch: 4,             // sideways is drawn this much bigger than vertical
-  endHold: 3,                // seconds the wide ending shot stays before the results
-  driftFree: 14,             // m/s sideways in freefall
-  driftChute: 5,             // m/s sideways under the chute
-  botDriftSpread: 16,        // m, bots wander this far from you
-  fastForward: 2,            // time multiplier once you have landed and bots are still falling
-  slowmoScale: 0.35,         // time scale at the chute-open beat
-  slowmoSecs: 0.3,
-  chuteWarp: 1,              // time speed-up while every jumper still in the air is under a chute and high up
+  driftFree: 14,           // m/s sideways in freefall
+  driftChute: 5,
+  botDriftSpread: 16,
+  endHold: 3,              // seconds the wide ground shot stays before the results
+  skipSpeed: 8,            // time multiplier for Skip to results
   historyLen: 20,
-  rescueTokens: 1000,        // given when you are below the minimum bet
-  streakExtra: 500,          // extra tokens per streak day beyond the first
-  streakExtraMax: 5000,
+
+  // profiles
+  nameMin: 3,
+  nameMax: 16,
+  starterSuits: ['suit_classic', 'suit_flame', 'suit_camo', 'suit_racing'],
+  avatarCount: 12,
+
+  // sound
+  defaultVolume: 0.7,
 };

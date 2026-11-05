@@ -1,767 +1,612 @@
-// Freefall v2: 2D side view. World metres: x sideways, alt above ground. Screen follows one diver.
+// Freefall v4: page, round flow and drawing. Numbers live in config.js, maths in sim.js, saving in state.js.
 import { CONFIG as C } from './config.js';
 import * as S from './sim.js';
-import { CATALOG, CATEGORIES, find } from './catalog.js';
-import { Store, ACH } from './state.js';
+import { Store, nameOk, ACH } from './state.js';
+import { CATALOG, CATEGORIES, find, POSES } from './catalog.js';
 import { Sfx } from './audio.js';
-import { Art } from './art.js';
+import * as A from './art.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-const lerp = (a, b, t) => a + (b - a) * t;
-const mod = (a, n) => ((a % n) + n) % n;
-const hash = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
-const h2 = (a, b) => hash(a * 7.13 + b * 3.77 + 1.9);
-const easeOutBack = (t) => { const c = 1.9; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
-const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-const short = (n) => (n >= 10000 ? Math.round(n / 1000) + 'k' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n));
-
-// ---------------------------------------------------------------- setup
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const params = new URLSearchParams(location.search);
-const nowFn = params.get('now') ? () => new Date(params.get('now')) : () => new Date();
-const store = new Store(localStorage, nowFn);
-const sfx = new Sfx(); const art = new Art();
-const cv = $('c'), ctx = cv.getContext('2d');
-let W = 0, H = 0, anchorY = 0, pxm = 1, pxx = 1, cell = 140, mpp = 44, endMode = false;
+const show = (el, on = true) => el.classList.toggle('hide', !on);
 
-let reduce = store.s.settings.reduce;
-if (reduce === null) reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-function applySettings() {
-  document.documentElement.classList.toggle('reduce', !!reduce);
-  const th = store.s.settings.theme; if (th === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', th);
-  $('setreduce').setAttribute('aria-checked', String(!!reduce)); $('setsound').setAttribute('aria-checked', String(store.s.settings.sound));
-  document.querySelectorAll('#settheme button').forEach((b) => b.classList.toggle('on', b.dataset.v === store.s.settings.theme));
-  sfx.on = store.s.settings.sound; if (sfx.ctx) sfx.setOn(sfx.on);
-}
+const store = new Store();
+const sfx = new Sfx();
+sfx.vol = store.g.volume; sfx.muted = store.g.muted;
 
-function layout() {
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  W = innerWidth; H = innerHeight; cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  anchorY = endMode ? H * 0.68 : H * 0.38; pxm = (H - H * 0.38) / C.groundVisibleM; pxx = pxm * C.xStretch; cell = clamp(H * 0.17, 110, 170); mpp = cell / 3.2;
-}
-addEventListener('resize', layout); layout();
-
-// ---------------------------------------------------------------- game state
 const G = {
-  state: 'idle', t: 0, round: null, watch: -1, camAlt: 900, camX: 0, offA: 0, ease: 0, timeScale: 1, slow: 0, shake: 0,
-  balShown: store.balance, parts: [], trail: [], lines: [], acc: 0, forceH: params.get('h') ? +params.get('h') : null, histDirty: true, hudT: 0,
-  input: { key: 0, touch: 0 }, lastMultInt: 1,
+  state: 'idle', round: null, t: 0, camAlt: 0, camX: 0, target: null, timeScale: 1,
+  forceH: params.get('h') ? +params.get('h') : null,
+  balShown: 0, coinAcc: 0, coinN: 0, dust: [], endT: 0, lbT: 0, pvT: 0, drift: 0, keys: 0,
+  W: 390, H: 844, dpr: 1, news: [],
 };
-window.__ff = { G, store, art, sfx, C };
+window.__ff = { G, store, sfx, C, S };
+window.__errs = [];
+window.addEventListener('error', (e) => window.__errs.push(e.message));
+window.addEventListener('unhandledrejection', (e) => window.__errs.push(String(e.reason)));
 
-function equippedLook() { return { suit: store.equipped('suit'), helmet: store.equipped('helmet'), chute: store.equipped('chute') }; }
-const rndLook = () => ({ suit: CATALOG.suit[Math.floor(Math.random() * CATALOG.suit.length)].id, helmet: CATALOG.helmet[Math.floor(Math.random() * CATALOG.helmet.length)].id, chute: CATALOG.chute[Math.floor(Math.random() * CATALOG.chute.length)].id });
+const cv = $('c'), ctx = cv.getContext('2d');
+const ppm = () => G.H * C.viewPxPerM;
+const pxX = () => ppm() * C.xStretch;
+const sy = (alt) => G.H * 0.42 + (G.camAlt - alt) * ppm();
+const sxOf = (x) => G.W / 2 + (x - G.camX) * pxX();
+const unit = () => clamp(Math.min(G.W, G.H) * 0.045, 14, 26);
 
-function startRound(bet) {
-  const h = G.forceH || S.randomHeight();
-  const n = C.botsMin + Math.floor(Math.random() * (C.botsMax - C.botsMin + 1));
-  const names = shuffle(C.botNames).slice(0, n);
-  const offs = shuffle(names.map((_, i) => (i - (n - 1) / 2) * (2 * C.botDriftSpread / Math.max(1, n - 1))));
-  const bots = names.map((nm, i) => {
-    const b = S.makeBot(nm, store.balance, h);
-    Object.assign(b, { emo: CATALOG.emote[Math.floor(Math.random() * CATALOG.emote.length)].id, x: offs[i], vx: 0, ox: offs[i], nt: 0, face: 1, openT: -1, announced: false, reported: false, phase: Math.random() * 6, look: rndLook() });
-    return b;
-  });
-  const me = { j: S.newJumper(h), x: 0, vx: 0, face: 1, openT: -1, phase: 0, look: equippedLook(), emo: store.equipped('emote'), bet, landed: false, rec: null };
-  G.round = { h, bet, me, bots, t: 0, planeX: -2, plane: store.equipped('plane'), finishAt: null, results: false, endList: null, endT: 0 };
-  store.startRound(bet);
-  G.state = 'fall'; G.watch = -1; G.camAlt = h; G.camX = 0; G.offA = 0; G.timeScale = 1; G.slow = 0; G.parts = []; G.trail = []; G.lines = []; G.acc = 0;
-  G.lastMultInt = 1; G.trailT = 0; G.camX = 0;
-  setUI();
+function resize() {
+  const r = $('stage').getBoundingClientRect();
+  G.W = Math.max(200, r.width); G.H = Math.max(300, r.height); G.dpr = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = Math.round(G.W * G.dpr); cv.height = Math.round(G.H * G.dpr);
 }
+new ResizeObserver(resize).observe($('stage'));
+
+// ---------- small helpers ----------
+function mk(w, h) {
+  const c = document.createElement('canvas'); c.width = w * 2; c.height = h * 2;
+  const g = c.getContext('2d'); g.scale(2, 2); return [c, g, w, h];
+}
+let toastTimer = 0;
+function toast(msg, onclick) {
+  const t = $('toast'); t.textContent = msg; show(t); t.style.pointerEvents = onclick ? 'auto' : 'none';
+  t.onclick = onclick || null; clearTimeout(toastTimer); toastTimer = setTimeout(() => show(t, false), onclick ? 5000 : 2600);
+}
+const equippedCfg = () => {
+  const e = store.s.equipped;
+  return { face: store.s.avatar, suit: e.suit, helmet: e.helmet, chute: e.chute, trail: e.trail, emote: e.emote, plane: e.plane };
+};
+const lookOf = (cfg) => {
+  const l = (cat, id) => (find(cat, id) || CATALOG[cat][0]).look;
+  return { face: cfg.face, suit: l('suit', cfg.suit), helmet: l('helmet', cfg.helmet), chute: l('chute', cfg.chute), trail: l('trail', cfg.trail), pose: l('emote', cfg.emote).pose };
+};
+
+// ---------- sheets ----------
+const SHEETS = ['betp', 'resp', 'claimp', 'startp', 'shop', 'recp', 'setp'];
+function openSheet(id) { SHEETS.forEach((s) => show($(s), s === id)); }
+function closeSheets() { SHEETS.forEach((s) => show($(s), false)); }
+
+// ---------- start screen ----------
+let pickFace = 0, pickSuit = C.starterSuits[0];
+function buildStart(canCancel) {
+  const faces = $('faces'); faces.textContent = '';
+  for (let i = 0; i < C.avatarCount; i++) {
+    const b = document.createElement('button'); b.className = 'pick' + (i === pickFace ? ' on' : ''); b.setAttribute('aria-label', 'Face ' + (i + 1));
+    const [c, g] = mk(52, 52); A.drawFace(g, i, 26, 33, 13, 2); b.appendChild(c);
+    b.onclick = () => { pickFace = i; buildStart(canCancel); }; faces.appendChild(b);
+  }
+  const suits = $('suits'); suits.textContent = '';
+  for (const id of C.starterSuits) {
+    const it = find('suit', id); const b = document.createElement('button'); b.className = 'pick' + (id === pickSuit ? ' on' : '');
+    const [c, g, w, h] = mk(60, 80);
+    A.drawPreview(g, w, h, { face: pickFace, suit: id, helmet: 'helmet_classic', chute: 'chute_classic', trail: 'none', emote: 'emote_wave', plane: 'plane_classic' }, 0, 'suit');
+    b.appendChild(c); const s = document.createElement('span'); s.textContent = it.name; b.appendChild(s);
+    b.onclick = () => { pickSuit = id; buildStart(canCancel); }; suits.appendChild(b);
+  }
+  show($('startcancel'), canCancel);
+}
+function openStart(canCancel) { $('uerr').textContent = ''; buildStart(canCancel); openSheet('startp'); show($('startp')); }
+$('playbtn').onclick = () => {
+  const name = $('uname').value.trim();
+  if (!nameOk(name)) { $('uerr').textContent = 'Use 3 to 16 letters, numbers or underscores.'; return; }
+  const r = store.createProfile(name, pickFace, pickSuit);
+  if (r === 'taken') { $('uerr').textContent = 'That name is already used on this device.'; return; }
+  if (r !== 'ok') { $('uerr').textContent = 'That name will not work.'; return; }
+  $('uname').value = ''; afterProfile(); toast('Welcome, ' + store.name + '. ' + fmt(store.welcome) + ' tokens to start.');
+};
+$('startcancel').onclick = () => { closeSheets(); toBet(); };
+
+function afterProfile() { G.balShown = store.balance; G.round = null; refreshAll(); G.state = 'idle'; if (store.claim) openClaim(); else toBet(); }
+
+// ---------- claim ----------
+function openClaim() {
+  const c = store.claim; $('claimamt').textContent = '+' + fmt(c.bonus + c.extra);
+  $('claimsub').textContent = c.extra ? `Daily claim plus ${fmt(c.extra)} for a ${c.streak} day streak.` : 'Your daily claim is ready.';
+  openSheet('claimp');
+}
+$('claimbtn').onclick = () => { store.claimBonus(); toBet(); };
+
+// ---------- bet ticket ----------
+function toBet() {
+  G.state = 'idle'; G.target = null; hideRoundUi();
+  $('tkno').textContent = 'No. ' + String(store.s.best.rounds + 1).padStart(4, '0');
+  $('tkname').textContent = store.name;
+  const poor = store.balance < C.minBet;
+  show($('rescue'), poor); show($('jump'), !poor);
+  const ab = $('abandoned'); show(ab, store.abandoned > 0); if (store.abandoned > 0) { ab.textContent = `Last round was cut off. The ${fmt(store.abandoned)} bet is gone.`; }
+  const bi = $('bet'); const v = parseInt(bi.value, 10);
+  if (!(v >= C.minBet) || v > store.balance) bi.value = String(Math.max(C.minBet, Math.min(100, store.balance)));
+  $('beterr').textContent = '';
+  const ch = $('chips'); ch.textContent = '';
+  for (const n of [10, 100, 500, 1000, 5000, 'All']) {
+    const b = document.createElement('button'); b.textContent = n === 'All' ? 'All in' : fmt(n);
+    b.onclick = () => { bi.value = String(n === 'All' ? store.balance : Math.min(n, store.balance)); $('beterr').textContent = ''; }; ch.appendChild(b);
+  }
+  openSheet('betp'); refreshAll();
+}
+$('betminus').onclick = () => { const b = $('bet'); b.value = String(Math.max(C.minBet, Math.floor((parseInt(b.value, 10) || C.minBet) / 2))); };
+$('betplus').onclick = () => { const b = $('bet'); b.value = String(Math.min(store.balance, (parseInt(b.value, 10) || C.minBet) * 2)); };
+$('rescue').onclick = () => { store.rescue(); toBet(); };
+$('jump').onclick = () => {
+  const raw = $('bet').value.replace(/[, ]/g, ''); const bet = /^\d+$/.test(raw) ? parseInt(raw, 10) : NaN;
+  if (!(bet >= C.minBet) || bet > store.balance) { $('beterr').textContent = `Bet between ${C.minBet} and ${fmt(store.balance)}.`; return; }
+  startRound(bet);
+};
+
+// ---------- round ----------
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function randomLook() {
+  const pick = (cat) => CATALOG[cat][Math.floor(Math.random() * CATALOG[cat].length)].id;
+  return lookOf({ face: Math.floor(Math.random() * C.avatarCount), suit: pick('suit'), helmet: pick('helmet'), chute: pick('chute'), trail: Math.random() < 0.35 ? pick('trail') : 'none', emote: pick('emote') });
+}
+function startRound(bet) {
+  sfx.init();
+  const h = G.forceH || S.randomHeight(Math.random, store.s.lastH);
+  store.startRound(bet, h);
+  const me = { name: store.name, me: true, bet, j: S.newJumper(h), look: lookOf(equippedCfg()), x: 0, lane: 0, amp: 0, f: 0, ph: 0, wasOpen: false, wasLanded: false, settled: false, out: null };
+  const nb = C.botsMin + Math.floor(Math.random() * (C.botsMax - C.botsMin + 1));
+  const names = shuffle(C.botNames.slice(0, 12)).filter((n) => n.toLowerCase() !== store.name.toLowerCase());
+  const bots = [];
+  for (let i = 0; i < nb; i++) {
+    const b = S.makeBot(names[i], h); const side = i % 2 ? 1 : -1;
+    Object.assign(b, { look: randomLook(), lane: side * (6 + Math.floor(i / 2) * 6), amp: 1.5 + Math.random() * 2, f: 0.5 + Math.random(), ph: Math.random() * 6, wasOpen: false, wasLanded: false, out: null });
+    b.x = b.lane; bots.push(b);
+  }
+  G.round = { h, me, bots, players: [me, ...bots], t0: G.t };
+  G.target = me; G.camAlt = h; G.camX = 0; G.dust = []; G.timeScale = 1; G.state = 'fall';
+  closeSheets(); show($('chutecard'), false); show($('crashcard'), false);
+  refreshAll(); lbRender(true);
+}
+function falling(p) { return !p.j.opened && !p.j.landed; }
+function highestFalling() { let best = null; for (const p of G.round.players) if (falling(p) && (!best || p.j.y > best.j.y)) best = p; return best; }
+function retarget() { const b = highestFalling(); if (b) G.target = b; }
+function cycle(dir) {
+  const r = G.round; if (!r) return;
+  const list = r.players.filter(falling).sort((a, b) => b.j.y - a.j.y); if (!list.length) return;
+  const i = list.indexOf(G.target); G.target = list[(i + dir + list.length * 2) % list.length];
+}
+const meDone = () => G.round && (G.round.me.j.opened || G.round.me.j.landed);
 
 function doOpen() {
-  const r = G.round; if (!r || G.state !== 'fall') return;
-  if (!S.open(r.me.j)) return;
-  r.me.openT = r.t; G.state = 'chute';
-  sfx.whump();
-  if (!reduce) { G.slow = C.slowmoSecs; G.ease = 1; G.shake = Math.max(G.shake, 5); }
-  $('mult').classList.add('locked');
-  const hb = highestBot(); if (hb >= 0) switchWatch(hb, false);
-  setUI();
+  const r = G.round; if (!r || G.state !== 'fall') return false;
+  const me = r.me; if (!S.open(me.j)) return false;
+  onOpen(me); return true;
 }
-
-// ---------------------------------------------------------------- simulation step
-function entityStep(e, dt, isMe, r) {
-  const j = e.j; const opened = j.opened;
-  if (!j.landed) {
-    let dir;
-    if (isMe) dir = clamp(G.input.key + G.input.touch, -1, 1);
-    else {
-      e.nt -= dt; if (e.nt <= 0) { e.nt = 0.8 + Math.random() * 2; e.ox = (Math.random() * 2 - 1) * C.botDriftSpread; }
-      const target = r.me.x + e.ox; dir = clamp((target - e.x) / 6, -1, 1) * 0.85;
-    }
-    const sp = opened ? C.driftChute : C.driftFree;
-    e.vx += (dir * sp - e.vx) * Math.min(1, dt * 5);
-    e.x += e.vx * dt;
-    if (Math.abs(dir) > 0.15) e.face = dir > 0 ? 1 : -1;
-  } else e.vx = 0;
+function onOpen(p) {
+  const r = G.round; p.wasOpen = true; p.openT = G.t; sfx.snap(p.me ? 1 : 0.3);
+  const j = p.j; p.mult = S.multiplierAt(j.openFallen); p.spare = j.openAlt - S.minSafeAlt(j.openV);
+  if (p.me) {
+    const c = $('chutecard'); c.classList.toggle('bad', !j.openSafe); c.textContent = '';
+    if (j.openSafe) { const b = document.createElement('b'); b.textContent = `Safe, ${fmt(p.spare)} m to spare.`; c.append(b, ` +${fmt(Math.round(p.bet * p.mult))} on landing`); }
+    else { const b = document.createElement('b'); b.textContent = 'Too low.'; c.append(b, ' The chute will not hold you.'); }
+    show(c);
+  }
+  if (G.target === p || p.me) retarget();
+}
+function onLand(p) {
+  p.wasLanded = true; const j = p.j; p.crashed = !(j.opened && j.landSpeed < C.safeLanding);
+  if (p.crashed) sfx.crash(p.me ? 1 : 0.45); else sfx.thud(p.me ? 1 : 0.4);
+  if (p.me) { settleMe(); show($('chutecard'), false); }
+  if (G.target === p) retarget();
+}
+function settleMe() {
+  const me = G.round.me; if (me.settled) return; me.settled = true;
+  const o = S.outcome(me.j, me.bet); me.out = o;
+  G.news = store.finishRound({ payout: o.payout, win: o.win, mult: o.mult, h: G.round.h, opened: me.j.opened, openAlt: me.j.openAlt, bet: me.bet });
+  histRender();
+  if (!o.win) {
+    $('crashsub').textContent = `Jump from ${fmt(G.round.h)} m. Bet lost: ${fmt(me.bet)}.`;
+    show($('crashcard'));
+  }
 }
 
 function simStep(dt) {
-  const r = G.round; r.t += dt; const me = r.me;
-  if (!me.j.landed) { S.step(me.j, dt); entityStep(me, dt, true, r); if (me.j.landed) onMeLanded(); }
-  for (const b of r.bots) {
-    if (!b.done) { S.stepBot(b, dt); entityStep(b, dt, false, r); }
-    if (b.j.opened && !b.announced) {
-      b.announced = true; b.openT = r.t;
-      const m = S.multiplierAt(b.j.openFallen);
-      popup(`${b.name} opened at ${m.toFixed(2)}x`); sfx.botOpen();
-    }
-    if (b.done && !b.reported) {
-      b.reported = true; const win = b.result.win;
-      if (!win) { popup(`${b.name} crashed`, true); dust(b.x, 0, 14); } else dust(b.x, 0, 5);
-    }
+  const r = G.round, me = r.me; G.t += dt;
+  me.x = clamp(me.x + G.drift * C.driftFree * dt * (me.j.opened ? C.driftChute / C.driftFree : 1), -15, 15);
+  if (!me.j.landed) S.step(me.j, dt);
+  for (const b of r.bots) { S.stepBot(b, dt); b.x = b.lane + Math.sin(G.t * b.f + b.ph) * b.amp; }
+  for (const p of r.players) {
+    if (p.j.opened && !p.wasOpen) onOpen(p);
+    if (p.j.landed && !p.wasLanded) onLand(p);
   }
-  // trail for the player
-  if (G.state === 'fall' && store.equipped('trail') !== 'none') {
-    G.trailT = (G.trailT || 0) - dt;
-    if (G.trailT <= 0) { G.trailT = 0.035; G.trail.push({ x: me.x, alt: me.j.y, t: 0, life: 0.9, id: store.equipped('trail') }); }
-  }
-  // end of round
-  if (me.j.landed && r.bots.every((b) => b.done) && !r.endList && !r.results) startEnding();
+  if (G.state === 'fall' && !r.players.some(falling)) beginEnding();
 }
 
-function onMeLanded() {
-  const r = G.round, me = r.me, j = me.j;
-  const out = S.outcome(j, r.bet);
-  me.rec = { h: r.h, bet: r.bet, win: out.win, mult: out.mult, payout: out.payout, opened: j.opened, openAlt: j.openAlt, landSpeed: j.landSpeed };
-  me.landed = true; me.crashed = !out.win; r.meLandT = r.t;
-  G.state = 'landed';
-  const sx = W / 2, sy = anchorY + 0;
-  if (out.win) {
-    sfx.land(); coins(40);
-    G.balStart = store.balance; // balance before payout
-    store.finishRound(me.rec); r.ach = store.checkAch(null);
-    setTimeout(() => sfx.win(), 120);
-    r.finishAt = r.t + 1.4;
-  } else {
-    sfx.crash(); dust(me.x, 0, 26);
-    if (!reduce) { G.shake = 16; flash(0.5); } else flash(0.18);
-    store.finishRound(me.rec);
-    r.finishAt = r.t + 1.3;
+function beginEnding() {
+  const r = G.round; G.state = 'ending'; G.endT = C.endHold; G.timeScale = 1;
+  for (const p of r.players) {
+    if (!p.j.landed) S.finish(p.j);
+    p.wasLanded = true; p.crashed = !(p.j.opened && p.j.landSpeed < C.safeLanding);
+    p.out = S.outcome(p.j, p.bet);
+    if (!p.me) p.mult = p.j.opened ? S.multiplierAt(p.j.openFallen) : 0;
   }
-  r.ach = store.checkAch(null);
-  setUI();
+  settleMe(); r.me.mult = r.me.out.mult;
+  G.dust = [];
+  r.players.forEach((p, i) => { if (p.crashed) for (let k = 0; k < 16; k++) G.dust.push({ i, a: Math.random() * Math.PI, s: 0.4 + Math.random(), r: 3 + Math.random() * 6, t0: G.t }); });
+  if (r.players.some((p) => !p.crashed)) sfx.cheer();
+  sfx.wind(0);
+  show($('crashcard'), false); show($('chutecard'), false); hideRoundUi();
+  lbRender(true);
 }
 
 function showResults() {
-  const r = G.round; r.results = true; G.state = 'result'; G.watch = -1; G.timeScale = 1;
-  sfx.stopAll();
-  const me = r.me, rec = me.rec;
-  const rows = [{ name: 'You', me: true, bet: r.bet, win: rec.win, net: rec.win ? rec.payout - r.bet : -r.bet, mult: rec.mult, openAlt: rec.opened ? rec.openAlt : null, speed: rec.landSpeed }];
-  for (const b of r.bots) {
-    const o = b.result;
-    rows.push({ name: b.name, bet: b.bet, win: o.win, net: o.net, mult: o.mult, openAlt: b.j.opened ? b.j.openAlt : null, speed: o.landSpeed });
+  const r = G.round, me = r.me, o = me.out; G.state = 'result';
+  $('restitle').textContent = o.win ? 'Landed' : 'Crashed';
+  $('ressub').textContent = o.win ? `Opened after ${fmt(me.j.openFallen)} m of ${fmt(r.h)}. Multiplier x${o.mult.toFixed(2)}.` : `Jump from ${fmt(r.h)} m. The bet is gone.`;
+  const big = $('resbig'); big.textContent = o.win ? '+' + fmt(o.payout) : '-' + fmt(me.bet); big.className = 'mono ' + (o.win ? 'win' : 'lose');
+  const t = $('restbl'); t.textContent = '';
+  const rows = r.players.slice().sort((a, b) => (b.out.net) - (a.out.net));
+  for (const p of rows) {
+    const d = document.createElement('div'); d.className = 'r ' + (p.out.win ? 'w' : 'l') + (p.me ? ' me' : '');
+    const n = document.createElement('span'); n.textContent = p.name; const bt = document.createElement('span'); bt.textContent = fmt(p.bet);
+    const s = document.createElement('b'); s.textContent = p.out.win ? `x${p.out.mult.toFixed(2)}  +${fmt(p.out.payout)}` : 'Crashed'; d.append(n, bt, s); t.appendChild(d);
   }
-  rows.sort((a, b) => b.net - a.net);
-  $('restitle').textContent = rec.win ? 'Landed safely' : (rec.opened ? 'Too fast' : 'You never opened it');
-  $('ressub').innerHTML = `Real height <b>${fmt(r.h)} m</b>. ` + (rec.opened ? `You opened at ${fmt(rec.openAlt)} m for ${rec.mult.toFixed(2)}x.` : `You were at ${rec.mult.toFixed(2)}x.`);
-  const big = $('resbig'); big.className = rec.win ? 'win' : 'lose'; big.textContent = (rec.win ? '+' : '-') + fmt(Math.abs(rec.win ? rec.payout - r.bet : r.bet));
-  const head = '<div class="rrow head"><span>#</span><span>Jumper</span><span style="text-align:right">Bet</span><span style="text-align:right">Result</span></div>';
-  $('restbl').innerHTML = head + rows.map((x, i) => {
-    const detail = x.openAlt !== null ? `opened at ${fmt(x.openAlt)} m, ${x.mult.toFixed(2)}x` : 'never opened';
-    const tail = x.win ? '' : `, hit at ${Math.round(x.speed)} m/s`;
-    return `<div class="rrow${x.me ? ' me' : ''}"><span>${i + 1}</span><span>${x.name}<small>${detail}${tail}</small></span><span style="text-align:right">${fmt(x.bet)}</span><span class="${x.win ? 'g' : 'r'}">${x.win ? '+' : '-'}${fmt(Math.abs(x.net))}</span></div>`;
-  }).join('');
-  G.histDirty = true;
-  openPanel($('resp'));
-  setTimeout(() => { const m = document.querySelector('#restbl .me'); if (m) m.scrollIntoView({ block: 'nearest' }); }, 60);
-  if (r.ach && r.ach.length) r.ach.forEach((a, i) => setTimeout(() => toast(`Achievement: ${a.name}`), 500 + i * 1800));
-  setUI();
+  openSheet('resp');
+  for (const a of G.news || []) toast('Unlocked: ' + a.name);
+  G.news = [];
+}
+$('again').onclick = () => { if (store.balance < C.minBet) store.rescue(); toBet(); };
+$('crashx').onclick = () => show($('crashcard'), false);
+
+// ---------- input ----------
+let down = null;
+$('stage').addEventListener('pointerdown', (e) => {
+  sfx.init(); if (e.target.closest('button')) return;
+  down = { x: e.clientX, y: e.clientY, moved: false };
+});
+window.addEventListener('pointermove', (e) => {
+  if (!down) return; const dx = e.clientX - down.x;
+  if (Math.abs(dx) > 12) down.moved = true;
+  if (down.moved && G.state === 'fall' && !meDone()) G.drift = clamp(dx / 70, -1, 1);
+});
+window.addEventListener('pointerup', () => {
+  if (!down) return; const d = down; down = null; G.drift = G.keys;
+  if (!d.moved && G.state === 'fall') { if (!meDone()) doOpen(); else cycle(1); }
+});
+window.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') { if (e.key === 'Enter' && e.target.id === 'bet') $('jump').click(); if (e.key === 'Enter' && e.target.id === 'uname') $('playbtn').click(); return; }
+  if (G.state === 'fall') {
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (!meDone()) doOpen(); }
+    const d = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
+    if (d) { e.preventDefault(); if (meDone()) cycle(d); else { G.keys = d; G.drift = d; } }
+  } else if (G.state === 'idle' && e.key === 'Enter' && !$('betp').classList.contains('hide')) $('jump').click();
+});
+window.addEventListener('keyup', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { G.keys = 0; G.drift = 0; } });
+$('openbtn').onclick = () => doOpen();
+$('specprev').onclick = () => cycle(-1);
+$('specnext').onclick = () => cycle(1);
+$('skipbtn').onclick = () => { G.timeScale = C.skipSpeed; };
+document.addEventListener('click', (e) => { if (e.target.closest('button')) sfx.click(); }, true);
+
+function hideRoundUi() { ['bigwrap', 'watch', 'openbtn', 'driftpad', 'specprev', 'specnext', 'skipbtn'].forEach((i) => show($(i), false)); }
+function roundUi() {
+  const r = G.round; if (!r || G.state !== 'fall') return;
+  const done = meDone();
+  show($('bigwrap')); show($('openbtn'), !done); show($('driftpad'), !done);
+  show($('specprev'), done); show($('specnext'), done); show($('skipbtn'), done && G.timeScale === 1);
+  const w = $('watch'); show(w, done && !!G.target);
+  if (G.target && !G.target.me) w.textContent = 'Watching ' + G.target.name; else if (G.target) w.textContent = '';
 }
 
-// ---------------------------------------------------------------- effects
-function coins(n) {
-  const r = G.round; const x = W / 2, y = anchorY + cell * 0.3;
-  for (let i = 0; i < (reduce ? 8 : n); i++) {
-    const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4, sp = 160 + Math.random() * 380;
-    G.parts.push({ k: 'coin', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, g: 900, life: 0, max: 1.1 + Math.random() * 0.5, r: 5 + Math.random() * 3, spin: Math.random() * 6 });
-    if (i < 8) setTimeout(() => sfx.coin(i), i * 55);
+// ---------- shop and locker ----------
+let shopCat = 'suit', lockerMode = false, shopTimer = 0;
+function openShop(locker) { lockerMode = !!locker; $('shoptitle').textContent = locker ? 'Locker' : 'Shop'; if (!locker && !CATEGORIES.some((c) => c[0] === shopCat)) shopCat = 'suit'; shopRender(); openSheet('shop'); show($('panel'), true); clearInterval(shopTimer); shopTimer = setInterval(shopAnimate, 90); }
+function closeShop() { clearInterval(shopTimer); closeSheets(); refreshAll(); if (G.state === 'idle') toBet(); }
+let shopCanvases = [];
+function shopRender() {
+  $('shopbal').textContent = fmt(store.balance) + ' tokens';
+  const tabs = $('tabs'); tabs.textContent = '';
+  for (const [id, label] of CATEGORIES) { const b = document.createElement('button'); b.textContent = label; if (id === shopCat) b.className = 'on'; b.onclick = () => { shopCat = id; shopRender(); }; tabs.appendChild(b); }
+  const grid = $('grid'); grid.textContent = ''; shopCanvases = [];
+  const items = CATALOG[shopCat].filter((it) => !lockerMode || store.owns(it.id));
+  if (!items.length) { const d = document.createElement('div'); d.className = 'empty'; d.textContent = 'Nothing owned here yet.'; grid.appendChild(d); }
+  for (const it of items) {
+    const owned = store.owns(it.id), eq = store.equipped(shopCat) === it.id;
+    const d = document.createElement('div'); d.className = 'item' + (eq ? ' eq' : '');
+    const [c, g, w, h] = mk(150, 150); d.appendChild(c); shopCanvases.push({ g, w, h, it });
+    const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = it.name;
+    const pr = document.createElement('div'); pr.className = 'pr'; pr.textContent = owned ? (eq ? 'Equipped' : 'Owned') : it.price ? fmt(it.price) + ' tokens' : 'Free';
+    const b = document.createElement('button');
+    if (eq) { b.textContent = 'Equipped'; b.disabled = true; }
+    else if (owned) { b.textContent = 'Equip'; b.onclick = () => { store.equip(shopCat, it.id); shopRender(); pvDraw(true); }; }
+    else { b.textContent = 'Buy'; b.className = 'buy'; b.disabled = store.balance < it.price; b.onclick = () => buyItem(it); }
+    d.append(nm, pr, b); grid.appendChild(d);
   }
+  shopAnimate(true);
 }
-function dust(wx, alt, n) {
-  const r = G.round; if (!r) return;
-  const x = W / 2 + (wx - G.camX) * pxx; const y = anchorY + (G.camAlt - alt) * pxm;
-  dustAt(x, y, n);
+function buyItem(it) {
+  const r = store.buy(shopCat, it.id); if (r !== 'ok') { toast(r === 'poor' ? 'Not enough tokens.' : 'Already owned.'); return; }
+  G.balShown = store.balance; refreshAll(); shopRender();
+  toast(`Bought ${it.name}. Tap to undo.`, () => { if (store.undoBuy()) { G.balShown = store.balance; shopRender(); refreshAll(); show($('toast'), false); } });
 }
-function dustAt(x, y, n) {
-  for (let i = 0; i < (reduce ? Math.ceil(n / 3) : n); i++) {
-    const a = Math.PI + Math.random() * Math.PI, sp = 40 + Math.random() * 160;
-    G.parts.push({ k: 'dust', x, y: y - 4, vx: Math.cos(a) * sp * (Math.random() < .5 ? -1 : 1), vy: Math.sin(a) * sp * 0.7, g: 120, life: 0, max: 0.7 + Math.random() * 0.5, r: 6 + Math.random() * 10 });
-  }
+function shopAnimate(first) {
+  if (first !== true && shopCat !== 'emote') return;
+  const t = performance.now() / 1000, base = equippedCfg();
+  const mode = { suit: 'suit', helmet: 'helmet', chute: 'chute', trail: 'trail', emote: 'emote', plane: 'plane' }[shopCat];
+  for (const s of shopCanvases) A.drawPreview(s.g, s.w, s.h, { ...base, [shopCat]: s.it.id }, shopCat === 'emote' ? t : 0.6, mode);
 }
-function flash(a) { const f = $('flash'); f.style.transition = 'none'; f.style.opacity = a; void f.offsetWidth; f.style.transition = `opacity ${reduce ? 0.2 : 0.45}s ease-out`; f.style.opacity = 0; }
-function popup(text, bad) {
-  const d = document.createElement('div'); d.className = 'pop' + (bad ? ' bad' : ''); d.textContent = text; const p = $('pops'); p.appendChild(d);
-  setTimeout(() => d.remove(), 2300); while (p.children.length > 3) p.firstChild.remove();
-}
-let toastT = null;
-function toast(msg, action, fn) {
-  const t = $('toast'); t.innerHTML = ''; const s = document.createElement('span'); s.textContent = msg; t.appendChild(s);
-  if (action) { const b = document.createElement('button'); b.textContent = action; b.onclick = () => { fn(); t.classList.add('hide'); }; t.appendChild(b); }
-  t.classList.remove('hide'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hide'), action ? 5000 : 2600);
-}
+$('btnshop').onclick = () => openShop(false);
+$('btnlocker').onclick = () => { if (G.state === 'fall') return; panelOpen(false); openShop(true); };
+$('shopx').onclick = closeShop;
 
-// ---------------------------------------------------------------- rendering
-const SKY = () => find('bg', store.equipped('bg'));
-function drawSky(bg) {
-  const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, bg.sky[0]); g.addColorStop(1, bg.sky[1]); ctx.fillStyle = g; ctx.fillRect(-40, -40, W + 80, H + 80);
-  if (['bg_night', 'bg_space', 'bg_aurora'].includes(bg.id)) {
-    ctx.fillStyle = 'rgba(255,255,255,.85)';
-    for (let i = 0; i < 70; i++) { const x = hash(i) * W, y = hash(i + 99) * H * 0.85, s = 0.6 + hash(i + 7) * 1.4; ctx.fillRect(x, y, s, s); }
+// ---------- records ----------
+function openRecords() {
+  const b = store.s.best, body = $('recbody'); body.textContent = '';
+  if (!b.rounds) { const d = document.createElement('div'); d.className = 'empty'; d.textContent = 'No rounds yet.'; body.appendChild(d); }
+  else {
+    const g = document.createElement('div'); g.className = 'stats';
+    const rows = [['Rounds', fmt(b.rounds)], ['Landings', fmt(b.wins)], ['Crashes', fmt(b.crashes)], ['Best multiplier', 'x' + b.mult.toFixed(2)], ['Best payout', fmt(b.payout)], ['Longest streak', fmt(b.winStreak)], ['Tallest jump landed', fmt(b.tallest) + ' m'], ['Lowest open', b.lowOpen == null ? 'None' : fmt(b.lowOpen) + ' m']];
+    for (const [k, v] of rows) { const s = document.createElement('div'); s.className = 'stat'; const l = document.createElement('span'); l.className = 'lbl'; l.textContent = k; const bb = document.createElement('b'); bb.textContent = v; s.append(l, bb); g.appendChild(s); }
+    body.appendChild(g);
   }
-  const im = art.get(bg.id);
-  if (im) {
-    if (bg.id === 'bg_aurora') { const w = Math.max(W, 520); ctx.globalAlpha = 0.8; ctx.drawImage(im, (W - w) / 2, 0, w, w / 2); ctx.globalAlpha = 1; }
-    else { const s = Math.min(W, H) * 0.24; ctx.drawImage(im, W * 0.88 - s / 2, H * 0.1 - s / 2, s, s); }
-  }
+  const h = document.createElement('h3'); h.className = 'lbl'; h.textContent = 'Badges'; body.appendChild(h);
+  for (const a of ACH) { const d = document.createElement('div'); d.className = 'ach' + (store.s.ach[a.id] ? ' got' : ''); const n = document.createElement('span'); n.textContent = a.name + ': ' + a.desc; const st = document.createElement('b'); st.textContent = store.s.ach[a.id] ? 'Earned' : 'Locked'; d.append(n, st); body.appendChild(d); }
+  openSheet('recp');
 }
+$('btnrec').onclick = openRecords;
+$('recx').onclick = () => { closeSheets(); if (G.state === 'idle') toBet(); };
 
-function cloudsAndBirds(near) {
-  const camAlt = G.camAlt, camX = G.camX, tt = G.round ? G.round.t : G.t;
-  const list = [];
-  const span = (anchorY + 120) / (pxm * 0.5) + 30;
-  const k0 = Math.floor((camAlt - span) / 30), k1 = Math.floor((camAlt + span) / 30);
-  const TW = W + 520, sc = H / 844 + 0.25;
-  for (let k = k0; k <= k1; k++) {
-    for (let n = 0; n < 2; n++) {
-      if (h2(k, n * 9 + 1) > (n ? 0.3 : 0.55)) continue;
-      const alt = k * 30 + h2(k, n * 9 + 2) * 30, par = 0.5 + h2(k, n * 9 + 3) * 0.95;
-      if ((par > 1.05) !== near) continue;
-      const y = anchorY + (camAlt - alt) * pxm * par; if (y < -120 || y > H + 120) continue;
-      const w = (140 + 190 * h2(k, n * 9 + 5)) * (0.55 + par * 0.55) * sc;
-      const x = mod(h2(k, n * 9 + 4) * TW - camX * pxm * par * 0.9 - (tt * 1.5), TW) - 260;
-      list.push({ y, x, w, par, v: Math.floor(h2(k, n * 9 + 6) * 3) });
+// ---------- settings ----------
+function openSettings() {
+  $('rname').value = store.name; $('rerr').textContent = ''; $('vol').value = Math.round(store.g.volume * 100); $('mutebtn').textContent = store.g.muted ? 'Unmute' : 'Mute';
+  const pl = $('plist'); pl.textContent = '';
+  for (const p of store.profiles()) {
+    const d = document.createElement('div'); d.className = 'prow' + (p.id === store.s.id ? ' on' : '');
+    const n = document.createElement('span'); n.textContent = `${p.name}  ${fmt(p.balance)}`;
+    d.appendChild(n);
+    if (p.id !== store.s.id) { const b = document.createElement('button'); b.className = 'pill small'; b.textContent = 'Play as'; b.onclick = () => { store.switchTo(p.id); afterProfile(); }; d.appendChild(b); }
+    else { const s = document.createElement('span'); s.className = 'lbl'; s.textContent = 'Current'; d.appendChild(s); }
+    pl.appendChild(d);
+  }
+  openSheet('setp');
+}
+$('btnset').onclick = () => { if (G.state === 'fall') return; openSettings(); };
+$('setx').onclick = () => { closeSheets(); if (G.state === 'idle') toBet(); };
+$('rnamebtn').onclick = () => {
+  const r = store.rename($('rname').value);
+  $('rerr').textContent = r === 'ok' ? 'Saved.' : r === 'taken' ? 'That name is already used on this device.' : 'Use 3 to 16 letters, numbers or underscores.';
+  if (r === 'ok') refreshAll();
+};
+$('vol').oninput = (e) => { const v = +e.target.value / 100; sfx.setVolume(v); store.setGlobal('volume', v); };
+$('mutebtn').onclick = () => { const m = !store.g.muted; sfx.setMuted(m); store.setGlobal('muted', m); $('mutebtn').textContent = m ? 'Unmute' : 'Mute'; };
+$('newplayer').onclick = () => { openStart(true); };
+
+// ---------- side panel ----------
+function panelOpen(on) { $('panel').classList.toggle('open', on); }
+$('paneltab').onclick = () => panelOpen(!$('panel').classList.contains('open'));
+let lbSig = '';
+function lbRender(force) {
+  const r = G.round, box = $('lb');
+  if (!r) { if (lbSig !== 'none') { lbSig = 'none'; box.textContent = ''; const d = document.createElement('div'); d.className = 'empty'; d.textContent = 'No round yet.'; box.appendChild(d); } return; }
+  const rows = r.players.map((p) => {
+    const j = p.j; let status, cls, key;
+    if (G.state === 'fall' || G.state === 'ending' || G.state === 'result') {
+      if (p.wasLanded && p.crashed) { status = 'Crashed'; cls = 'l'; key = -1; }
+      else if (j.opened) { status = 'x' + S.multiplierAt(j.openFallen).toFixed(2); cls = 'w'; key = S.multiplierAt(j.openFallen); }
+      else { const m = S.multiplierAt(j.fallen); status = 'x' + m.toFixed(2); cls = ''; key = m; }
     }
+    return { p, status, cls, key };
+  }).sort((a, b) => b.key - a.key);
+  const sig = rows.map((x) => x.p.name + x.status).join('|');
+  if (!force && sig === lbSig) return; lbSig = sig;
+  box.textContent = '';
+  for (const x of rows) {
+    const d = document.createElement('div'); d.className = 'r ' + x.cls + (x.p.me ? ' me' : '');
+    const n = document.createElement('span'); n.textContent = x.p.name; const b = document.createElement('span'); b.textContent = fmt(x.p.bet);
+    const s = document.createElement('b'); s.textContent = x.status; d.append(n, b, s); box.appendChild(d);
   }
-  list.sort((a, b) => a.par - b.par);
-  for (const c of list) { const im = art.get('sc_cloud_' + c.v); if (!im) continue; ctx.globalAlpha = near ? 0.85 : 0.95; ctx.drawImage(im, c.x - c.w / 2, c.y - c.w / 4, c.w, c.w / 2); }
+}
+const [pvC, pvG] = [$('pv'), $('pv').getContext('2d')];
+pvC.width = 480; pvC.height = 500;
+function pvDraw(force) {
+  if (!store.s) return; const t = performance.now() / 1000;
+  if (!force && t - G.pvT < 0.05) return; G.pvT = t;
+  pvG.setTransform(2, 0, 0, 2, 0, 0); A.drawPreview(pvG, 240, 250, equippedCfg(), t, 'diver');
+  $('pvname').textContent = store.name;
+}
+
+// ---------- hud text ----------
+function histRender() {
+  const h = $('hist'); h.textContent = '';
+  const hist = store.s.history;
+  if (!hist.length) { const e = document.createElement('em'); e.textContent = 'No rounds yet.'; h.appendChild(e); return; }
+  for (const x of hist.slice(0, 8)) { const s = document.createElement('span'); s.className = x.win ? 'w' : 'l'; s.textContent = x.win ? `${fmt(x.h)} m x${x.mult.toFixed(2)}` : `${fmt(x.h)} m`; h.appendChild(s); }
+}
+function refreshAll() {
+  if (!store.s) return;
+  $('streakchip').textContent = store.s.streak > 1 ? `Day ${store.s.streak}` : '';
+  histRender(); pvDraw(true); lbSig = ''; lbRender(true);
+  $('balv').textContent = fmt(G.balShown);
+}
+
+// ---------- drawing ----------
+let skyGrad = null, skyH = 0;
+function drawSky(T) {
+  const W = G.W, H = G.H;
+  if (!skyGrad || skyH !== H) { skyGrad = ctx.createLinearGradient(0, 0, 0, H); skyGrad.addColorStop(0, A.PAL.ink); skyGrad.addColorStop(0.6, A.PAL.c0); skyGrad.addColorStop(1, A.PAL.c1); skyH = H; }
+  ctx.fillStyle = skyGrad; ctx.fillRect(0, 0, W, H);
+  A.moon(ctx, W * 0.78, H * 0.17, Math.min(W, H) * 0.06);
+  const cl = A.cloudSprites(); const p = ppm();
+  ctx.save(); ctx.globalAlpha = 0.75;
+  for (let k = 0; k < 10; k++) {
+    const y = H * 0.42 + (G.camAlt - (150 + k * 330)) * p * 0.6;
+    if (y < -140 || y > H + 20) continue;
+    const x = ((k * 197 + T * (3 + (k % 3) * 2)) % (W + 360)) - 180;
+    const s = 0.8 + (k % 3) * 0.25; ctx.drawImage(cl[k % cl.length], x, y, 360 * s, 130 * s);
+  }
+  ctx.restore();
+  ctx.strokeStyle = 'rgba(232,220,195,0.2)'; ctx.lineWidth = 1; ctx.beginPath();
+  for (let i = 0; i < 55; i++) {
+    const x0 = (i * 131.7) % W; const y = ((i * 97.3 + G.camAlt * p * 1.6 + T * 380 * (0.7 + (i % 5) * 0.1)) % (H + 40) + H + 40) % (H + 40) - 20;
+    ctx.moveTo(x0, y); ctx.lineTo(x0 - 3, y + 15);
+  }
+  ctx.stroke();
+}
+function drawGlow(c) {
+  const H = G.H, a = 0.18 + 0.72 * c; const g = ctx.createLinearGradient(0, H, 0, H * 0.4);
+  g.addColorStop(0, `rgba(163,40,31,${a})`); g.addColorStop(0.45, `rgba(110,22,18,${a * 0.5})`); g.addColorStop(1, 'rgba(110,22,18,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, H * 0.4, G.W, H * 0.6);
+}
+function drawGround(gy) {
+  const W = G.W, H = G.H;
+  ctx.fillStyle = A.PAL.c1; ctx.fillRect(0, gy, W, H - gy + 2);
+  ctx.strokeStyle = A.PAL.gold; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, gy + 0.5); ctx.lineTo(W, gy + 0.5); ctx.stroke();
+  const off = -G.camX * pxX() * 0.4;
+  for (let k = 0; k < 9; k++) {
+    const x = (((k * 173 + 40 + off) % (W + 240)) + W + 240) % (W + 240) - 120; const s = 34 + (k % 3) * 12;
+    if (k % 3 === 0) A.drawHouse(ctx, x, gy, s, 2); else A.drawTree(ctx, x, gy, s, 2);
+  }
+}
+function drawPlayer(p, x, y, T, labelCol) {
+  const u = unit(), j = p.j, lw = Math.max(1.4, u * 0.16);
+  let pose;
+  if (j.landed) pose = p.crashed ? 'crash' : p.look.pose; else pose = j.opened ? 'chute' : 'fall';
+  if (!j.opened && !j.landed) A.drawTrail(ctx, p.look.trail, x, y - u * 2.4, u, T, 1);
+  const fig = A.drawFigure(ctx, { x, y, u, face: p.look.face, suit: p.look.suit, helmet: p.look.helmet, pose: A.poseFor(pose, T + (p.ph || 0)) });
+  let top = y - u * 2.2;
+  if (j.opened && !j.landed) {
+    const o = clamp((G.t - p.openT) / 0.25, 0.05, 1.15), hem = y - u * 2.7;
+    const pr = A.drawParasol(ctx, x, hem, u * 5.4, p.look.chute, o, lw); A.drawStrings(ctx, pr, fig.handL, fig.handR, lw);
+    top = hem - u * 2.3;
+  }
+  ctx.font = `700 11px ${A.SYS}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.lineWidth = 3; ctx.strokeStyle = A.PAL.ink; ctx.lineJoin = 'round';
+  ctx.strokeText(p.name, x, top - 4); ctx.fillStyle = labelCol; ctx.fillText(p.name, x, top - 4);
+  if (p.wasOpen && j.openSafe && G.t - p.openT < 2.6) {
+    const k = G.t - p.openT; const sc = k < 0.18 ? 0.4 + k / 0.18 * 0.7 : k < 0.3 ? 1.1 - (k - 0.18) * 0.8 : 1; A.drawStamp(ctx, x, top - 34, 'Safe', fmt(j.openFallen) + ' m', clamp(2.6 - k, 0, 1), sc);
+  }
+}
+function drawRuler(T) {
+  const r = G.round, H = G.H; const x = 22, y0 = 76, y1 = H - 78; if (!r) return;
+  ctx.save(); ctx.strokeStyle = A.PAL.gold; ctx.fillStyle = A.PAL.cream; ctx.lineWidth = 1.5; ctx.font = `10px ${A.SYS}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y1); ctx.stroke();
+  const step = r.h > 1200 ? 500 : r.h > 400 ? 100 : 50;
+  for (let m = 0; m <= r.h; m += step) { const yy = y0 + (m / r.h) * (y1 - y0); ctx.beginPath(); ctx.moveTo(x - 4, yy); ctx.lineTo(x + 4, yy); ctx.stroke(); }
+  for (let m = 0; m <= r.h; m += step * 2) { const yy = y0 + (m / r.h) * (y1 - y0); ctx.globalAlpha = 0.6; ctx.fillText(String(m), x + 7, yy); }
   ctx.globalAlpha = 1;
-  if (near) return;
-  // birds
-  const b0 = Math.floor((camAlt - span) / 90), b1 = Math.floor((camAlt + span) / 90);
-  for (let k = b0; k <= b1; k++) {
-    if (k * 90 > 2300 || h2(k, 70) > 0.4) continue;
-    const alt = k * 90 + h2(k, 71) * 90, par = 0.9 + h2(k, 72) * 0.2;
-    const y = anchorY + (camAlt - alt) * pxm * par; if (y < -60 || y > H + 60) continue;
-    const dir = h2(k, 73) < 0.5 ? -1 : 1, vb = dir * (3 + h2(k, 74) * 4);
-    const x = mod(h2(k, 75) * TW - camX * pxm * par + (tt * vb * pxm), TW) - 260;
-    const w = 54 * sc, im = art.get('sc_bird_' + (Math.floor(tt * 7 + k) % 2));
-    if (!im) continue;
-    ctx.save(); ctx.translate(x, y); ctx.scale(dir, 1); ctx.drawImage(im, -w / 2, -w / 2, w, w); ctx.restore();
-  }
-}
-
-function drawGround(bg) {
-  const gy = anchorY + G.camAlt * pxm; if (gy > H + 200) return;
-  const dark = 1 - bg.light;
-  const camX = G.camX;
-  // distant hills
-  const hill = (col, base, amp, f, par, off) => {
-    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(-10, H + 10);
-    for (let x = -10; x <= W + 10; x += 12) { const wx = camX * pxm * par + x; ctx.lineTo(x, gy - base - amp * (Math.sin(wx * f + off) * 0.6 + Math.sin(wx * f * 2.3 + off * 2) * 0.4)); }
-    ctx.lineTo(W + 10, H + 10); ctx.closePath(); ctx.fill();
-  };
-  hill('#86bfa0', 70, 34, 0.0048, 0.25, 1); hill('#6fb08a', 38, 24, 0.0075, 0.45, 4);
-  // ground
-  ctx.fillStyle = '#62ad4c'; ctx.fillRect(-10, gy, W + 20, H - gy + 10);
-  ctx.fillStyle = '#79c25d'; ctx.fillRect(-10, gy, W + 20, 10);
-  ctx.fillStyle = '#58a044';
-  for (let i = 0; i < 5; i++) ctx.fillRect(-10, gy + 24 + i * (22 + i * 8), W + 20, 4 + i);
-  // scenery in 14 m cells, deterministic
-  const half = W / 2 / pxm + 10, i0 = Math.floor((camX - half) / 14), i1 = Math.ceil((camX + half) / 14);
-  for (let i = i0; i <= i1; i++) {
-    const r = h2(i, 1); if (r > 0.62) continue;
-    const wx = i * 14 + h2(i, 3) * 8, sx = W / 2 + (wx - camX) * pxm, row = h2(i, 4) < 0.35;
-    const base = gy + (row ? 12 : 2), k = pxm * (row ? 1.6 : 2.0);
-    if (r < 0.5) {
-      const im = art.get(r < 0.28 ? 'sc_tree_pine' : 'sc_tree_round'); if (!im) continue;
-      const s = k / 32; ctx.drawImage(im, sx - 128 * s, base - 262 * s, 256 * s, 320 * s);
-    } else {
-      const im = art.get('sc_house_' + (h2(i, 2) < 0.5 ? 0 : 1)); if (!im) continue;
-      const s = k / 42.67; ctx.drawImage(im, sx - 128 * s, base - 209 * s, 256 * s, 256 * s);
-    }
-  }
-  if (dark > 0.02) {
-    const g = ctx.createLinearGradient(0, gy - 160, 0, gy - 30); g.addColorStop(0, 'rgba(5,10,36,0)'); g.addColorStop(1, `rgba(5,10,36,${dark * 0.8})`);
-    ctx.fillStyle = g; ctx.fillRect(0, gy - 160, W, 130); ctx.fillStyle = `rgba(5,10,36,${dark * 0.8})`; ctx.fillRect(0, gy - 30, W, H - gy + 40);
-  }
-}
-
-function altSy(alt) { return anchorY + (G.camAlt - alt) * pxm; }
-function poseOf(e, r) {
-  const j = e.j;
-  if (j.landed) return e.crashed || (e.result && !e.result.win) ? 'crash' : 'land';
-  if (j.opened) { const since = r.t - e.openT; return since < 0.4 ? 'open' : (j.y < 4 ? 'land' : 'hang'); }
-  return Math.floor(r.t * (3 + 7 * j.v / C.terminalSpeed) + e.phase) % 2 ? 'fall_a' : 'fall_b';
-}
-function drawEntity(e, isMe, r) {
-  const j = e.j, x = W / 2 + (e.x - G.camX) * pxx; const pose = poseOf(e, r);
-  let y = altSy(j.y);
-  const landedBad = j.landed && (isMe ? e.crashed : (e.result && !e.result.win));
-  const foot = (pose === 'crash' ? 0.95 : pose === 'fall_a' || pose === 'fall_b' ? 0.45 : 0.98) * mpp;
-  y -= foot * clamp(1 - j.y / 6, 0, 1);
-  if (y < -cell * 2.5 || y > H + cell * 2) return;
-  const sc = 1 - 0.1 * G.ease;
-  const c = cell * sc, m = mpp * sc;
-  const tilt = (pose === 'fall_a' || pose === 'fall_b') ? clamp(e.vx / C.driftFree, -1, 1) * 0.12 * e.face : 0;
-  if (j.opened) {
-    if (landedBad) { art.chute(ctx, x, y, m, e.look.chute + '_down', e.face, 0, 1); }
-    else {
-      const p = clamp((r.t - e.openT) / 0.45, 0, 1), inf = p < 1 ? 0.12 + 0.88 * easeOutBack(p) : 1;
-      const swing = (-e.vx / C.driftFree) * 0.12 * (reduce ? 0 : 1);
-      art.chute(ctx, x, y, m, e.look.chute, e.face, swing, inf);
-    }
-  }
-  art.diver(ctx, x, y, c, e.look.suit, e.look.helmet, pose, e.face, tilt);
-  const idx = isMe ? -1 : r.bots.indexOf(e);
-  const label = isMe ? 'YOU' : e.name + ' ' + S.multiplierAt(j.opened ? j.openFallen : j.fallen).toFixed(1) + 'x';
-  ctx.font = '700 11px -apple-system, sans-serif'; const tw = ctx.measureText(label).width + 12;
-  const lx = clamp(x, tw / 2 + 4, W - tw / 2 - 4);
-  const ly = y - cell * (j.opened ? 1.3 : 0.55) - (isMe ? 0 : (idx % 3) * 17);
-  ctx.fillStyle = isMe ? '#E8461A' : 'rgba(0,0,0,.42)'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(lx - tw / 2, ly - 9, tw, 17, 8) : ctx.rect(lx - tw / 2, ly - 9, tw, 17); ctx.fill();
-  ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(label, lx, ly + 3);
-}
-
-
-// ---------------------------------------------------------------- off-screen arrows
-function drawArrows(r) {
-  const list = [r.me, ...r.bots].filter((e) => !e.j.landed);
-  const padX = 24, padT = 118, padB = 118; const cx = W / 2, cy = H / 2; const used = [];
-  ctx.font = '700 11px -apple-system, sans-serif'; ctx.textAlign = 'center';
-  for (const e of list) {
-    const sx = W / 2 + (e.x - G.camX) * pxx, sy = altSy(e.j.y);
-    if (sx > -8 && sx < W + 8 && sy > -24 && sy < H + 24) continue;
-    const isMe = e === r.me; let dx = sx - cx, dy = sy - cy; const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
-    const t = Math.min(dx ? (cx - padX) / Math.abs(dx) : 1e9, dy ? (dy < 0 ? cy - padT : H - padB - cy) / Math.abs(dy) : 1e9);
-    const ax = cx + dx * t, ay = cy + dy * t, ang = Math.atan2(dy, dx);
-    ctx.save(); ctx.translate(ax, ay); ctx.rotate(ang);
-    ctx.fillStyle = isMe ? '#E8461A' : '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 2; ctx.lineJoin = 'round';
-    ctx.beginPath(); ctx.moveTo(11, 0); ctx.lineTo(-7, -8); ctx.lineTo(-3, 0); ctx.lineTo(-7, 8); ctx.closePath(); ctx.stroke(); ctx.fill(); ctx.restore();
-    const label = (isMe ? 'YOU' : e.name) + '  ' + fmt(e.j.y) + ' m'; const tw = ctx.measureText(label).width + 12;
-    let lx = clamp(ax - dx * (tw / 2 + 16), tw / 2 + 4, W - tw / 2 - 4), ly = clamp(ay - dy * 22, 100, H - 100);
-    for (let k = 0; k < 8 && used.some((u) => Math.abs(u.x - lx) < (u.w + tw) / 2 && Math.abs(u.y - ly) < 19); k++) ly += (dy < 0 ? 1 : -1) * 20;
-    used.push({ x: lx, y: ly, w: tw });
-    ctx.fillStyle = isMe ? '#E8461A' : 'rgba(0,0,0,.55)'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(lx - tw / 2, ly - 9, tw, 18, 9) : ctx.rect(lx - tw / 2, ly - 9, tw, 18); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.fillText(label, lx, ly + 4);
-  }
-}
-
-// ---------------------------------------------------------------- ending: everyone on the ground in one wide shot
-function startEnding() {
-  const r = G.round; endMode = true; layout();
-  G.state = 'ending'; G.timeScale = 1; G.slow = 0; G.watch = -1; G.parts = []; G.lines = []; G.trail = []; G.camAlt = 0; G.camX = 0; G.offA = 0;
-  sfx.stopAll();
-  const all = [r.me, ...r.bots]; all.sort((a, b) => a.x - b.x);
-  r.endList = all.map((e) => ({ e, crashed: e === r.me ? !!e.crashed : !e.result.win, puffs: 0 }));
-  r.endT = 0; if (r.endList.some((i) => i.crashed) && !reduce) G.shake = Math.max(G.shake, 10);
-  setUI();
-}
-const EMO_FPS = { wave: 5, dance: 5, flex: 3, salute: 2, pump: 4, dab: 3, flip: 6, sit: 2 };
-function emoXform(k, T, m) {
-  if (k === 'dance') return { dy: -Math.abs(Math.sin(T * 7)) * 0.14 * m, rot: Math.sin(T * 7) * 0.07 };
-  if (k === 'pump') return { dy: -Math.abs(Math.sin(T * 6)) * 0.18 * m, rot: 0 };
-  if (k === 'flip') { const p = (T % 1.5) / 1.5; if (p < 0.5) { const q = p / 0.5; return { dy: -Math.sin(Math.PI * q) * 1.5 * m, rot: -q * Math.PI * 2, air: true }; } return { dy: 0, rot: 0 }; }
-  return { dy: 0, rot: 0 };
-}
-function drawEnding(r) {
-  const list = r.endList, n = list.length, T = r.endT, gy = anchorY;
-  const sc0 = clamp((W / (n + 0.6)) / cell * 2.6, 0.75, 1.9), rowGap = Math.min(70, H * 0.075);
-  for (const row of [0, 1]) list.forEach((it, i) => {
-    if (i % 2 !== row) return;
-    const e = it.e, x = W * (i + 1) / (n + 1), sc = sc0 * (row ? 1 : 0.94), m = mpp * sc, c = cell * sc, y0 = gy + 6 + row * rowGap;
-    if (it.crashed) {
-      ctx.fillStyle = 'rgba(40,26,16,.5)'; ctx.beginPath(); ctx.ellipse(x, y0 + 1, 1.0 * m, 0.24 * m, 0, 0, 7); ctx.fill();
-      ctx.fillStyle = '#5a3d26'; ctx.beginPath(); ctx.ellipse(x, y0 + 2, 0.75 * m, 0.2 * m, 0, 0, 7); ctx.fill();
-      ctx.save(); ctx.beginPath(); ctx.rect(x - 2 * m, y0 - 4 * m, 4 * m, 4 * m + 1); ctx.clip();
-      art.diver(ctx, x, y0 - 0.95 * m + 0.75 * m, c, e.look.suit, e.look.helmet, 'crash', e.face || 1, 0); ctx.restore();
-      ctx.fillStyle = '#5a3d26'; ctx.beginPath(); ctx.ellipse(x - 0.5 * m, y0 + 1, 0.3 * m, 0.1 * m, 0, 0, 7); ctx.ellipse(x + 0.55 * m, y0 + 1, 0.25 * m, 0.09 * m, 0, 0, 7); ctx.fill();
-      // dust: a burst on impact, then a few drifting puffs
-      const want = Math.min(5, Math.floor(T / 0.45) + 1); while (it.puffs < want) { dustAt(x, y0, it.puffs === 0 ? 30 : 12); it.puffs++; }
-    } else {
-      const k = (e.emo || 'emote_wave').slice(6), fps = EMO_FPS[k] || 4; let ph = Math.floor(T * fps + i) % 2 ? 'b' : 'a';
-      const xf = emoXform(k, T + i * 0.37, m); if (k === 'flip' && xf.air) ph = 'b';
-      let pose = `emo_${k}_${ph}`; if (!art.get(`diver_${e.look.suit}_${pose}`)) pose = 'land';
-      art.diver(ctx, x, y0 - 0.98 * m + xf.dy, c, e.look.suit, e.look.helmet, pose, e.face || 1, xf.rot);
-      ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(x, y0 + 1, 0.6 * m, 0.12 * m, 0, 0, 7); ctx.fill();
-    }
-    const label = e === r.me ? 'YOU' : e.name; ctx.font = '700 10.5px -apple-system, sans-serif'; ctx.textAlign = 'center';
-    const tw = ctx.measureText(label).width + 10, ly = y0 - 2.3 * m - 8;
-    ctx.fillStyle = e === r.me ? '#E8461A' : 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x - tw / 2, ly - 8, tw, 16, 8) : ctx.rect(x - tw / 2, ly - 8, tw, 16); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.fillText(label, x, ly + 3.5);
-  });
-}
-
-function drawPlane(r) {
-  const im = art.get('plane_' + r.plane.replace('plane_', '')); if (!im) return;
-  const px = W / 2 + (r.planeX + r.t * 24 - G.camX) * pxx, py = altSy(r.h + 0.5);
-  const w = cell * 1.9; ctx.drawImage(im, px - w / 2, py - w / 4 - cell * 0.1, w, w / 2);
-}
-
-function speedLines(dt, v) {
-  const s = clamp(v / C.terminalSpeed, 0, 1), L = G.lines;
-  const want = reduce ? Math.round(s * s * 6) : Math.round(s * s * 30 + (s > 0.2 ? 6 : 0));
-  while (L.length < want) L.push({ x: Math.random() * W, y: Math.random() * H, len: 0.5 + Math.random(), sp: 0.7 + Math.random() * 0.6, a: 0.15 + Math.random() * 0.25, dot: Math.random() < 0.45 });
-  if (L.length > want) L.length = want;
-  ctx.lineCap = 'round';
-  for (const l of L) {
-    l.y -= v * pxm * l.sp * dt * 1.15; if (l.y < -120) { l.y = H + Math.random() * 60; l.x = Math.random() * W; }
-    ctx.strokeStyle = `rgba(255,255,255,${l.a * (0.4 + s)})`; ctx.lineWidth = l.dot ? 2 : 1.4;
-    ctx.beginPath(); const len = l.dot ? 10 + s * 24 : 30 + s * s * 170 * l.len; ctx.moveTo(l.x, l.y); ctx.lineTo(l.x, l.y + len); ctx.stroke();
-  }
-}
-
-function drawParts(dt) {
-  for (let i = G.parts.length - 1; i >= 0; i--) {
-    const p = G.parts[i]; p.life += dt; if (p.life >= p.max) { G.parts.splice(i, 1); continue; }
-    p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt;
-    const a = 1 - p.life / p.max;
-    if (p.k === 'coin') {
-      const sx = Math.abs(Math.cos(p.life * 9 + p.spin));
-      ctx.fillStyle = `rgba(255,205,60,${a})`; ctx.beginPath(); ctx.ellipse(p.x, p.y, p.r * sx + 1, p.r, 0, 0, 7); ctx.fill();
-      ctx.strokeStyle = `rgba(190,130,10,${a})`; ctx.lineWidth = 1.5; ctx.stroke();
-    } else {
-      ctx.fillStyle = `rgba(150,120,85,${a * 0.55})`; ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (1 + p.life * 1.8), 0, 7); ctx.fill();
-    }
-  }
-  for (let i = G.trail.length - 1; i >= 0; i--) {
-    const tp = G.trail[i]; tp.t += dt; if (tp.t >= tp.life) { G.trail.splice(i, 1); continue; }
-    const im = art.get(tp.id); if (!im) continue;
-    const a = 1 - tp.t / tp.life, s = (30 + tp.t * 40) * (cell / 140);
-    ctx.globalAlpha = a * 0.9; ctx.drawImage(im, W / 2 + (tp.x - G.camX) * pxm - s / 2 - 6 * (G.round.me.face), altSy(tp.alt) - s / 2, s, s);
-  }
-  ctx.globalAlpha = 1;
-}
-
-function followed() {
-  const r = G.round; if (!r) return null;
-  return G.watch >= 0 && r.bots[G.watch] ? r.bots[G.watch] : r.me;
-}
-
-function render(dt) {
-  const r = G.round, bg = SKY();
-  ctx.save();
-  if (G.shake > 0.3 && !reduce) { ctx.translate((Math.random() - 0.5) * G.shake, (Math.random() - 0.5) * G.shake); }
-  drawSky(bg);
-  cloudsAndBirds(false);
-  if (G.state === 'idle' || !r) {
-    const im = art.get(store.equipped('plane')); const w = cell * 2.2; const px = W / 2 + Math.sin(G.t * 0.25) * W * 0.12, py = H * 0.3 + Math.sin(G.t * 0.8) * 6;
-    if (im) ctx.drawImage(im, px - w / 2, py - w / 4, w, w / 2);
-    cloudsAndBirds(true);
-  } else if (r.endList) {
-    drawGround(bg); drawEnding(r); drawParts(dt);
-  } else {
-    drawGround(bg);
-    drawPlane(r);
-    for (const b of r.bots) drawEntity(b, false, r);
-    drawEntity(r.me, true, r);
-    const f = followed(); const v = f.j.landed ? 0 : f.j.v;
-    cloudsAndBirds(true);
-    speedLines(dt, G.state === 'result' ? 0 : (f.j.opened ? f.j.v * 0.4 : v));
-    drawParts(dt);
-    drawArrows(r);
+  const sl = y1 - (S.minSafeAlt(C.terminalSpeed) / r.h) * (y1 - y0);
+  ctx.strokeStyle = A.PAL.green; ctx.beginPath(); ctx.moveTo(x - 9, sl); ctx.lineTo(x + 9, sl); ctx.stroke(); ctx.fillStyle = A.PAL.green; ctx.fillText('safe line', x + 11, sl - 7);
+  for (const p of r.players) {
+    const yy = y0 + clamp(p.j.fallen / r.h, 0, 1) * (y1 - y0);
+    ctx.fillStyle = p.me ? A.PAL.orange : A.PAL.cream; ctx.strokeStyle = A.PAL.ink; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x + 3, yy); ctx.lineTo(x + (p.me ? 13 : 10), yy - (p.me ? 5 : 3.5)); ctx.lineTo(x + (p.me ? 13 : 10), yy + (p.me ? 5 : 3.5)); ctx.closePath(); ctx.fill(); ctx.stroke();
+    if (p.me) { ctx.font = `700 10px ${A.SYS}`; ctx.fillStyle = A.PAL.orange; ctx.fillText(p.name, x + 17, yy); ctx.font = `10px ${A.SYS}`; }
   }
   ctx.restore();
 }
-
-// ---------------------------------------------------------------- per-frame update
-function heat(m) {
-  const stops = [[1, [255, 255, 255]], [3, [255, 226, 140]], [6, [255, 170, 80]], [12, [255, 106, 43]], [25, [232, 70, 26]]];
-  for (let i = 1; i < stops.length; i++) if (m <= stops[i][0]) { const a = stops[i - 1], b = stops[i], t = (m - a[0]) / (b[0] - a[0]); return `rgb(${a[1].map((c, k) => Math.round(lerp(c, b[1][k], t))).join(',')})`; }
-  return 'rgb(232,70,26)';
+function drawArrow(p) {
+  const W = G.W, H = G.H; const x = sxOf(p.x), y = sy(p.j.y) - unit() * 2;
+  if (y > -20 && y < H + 20 && x > 36 && x < W - 6) return;
+  const ax = clamp(x, 56, W - 40), top = y < H / 2, ay = top ? 118 : H - 112;
+  ctx.save(); ctx.translate(ax, ay); ctx.fillStyle = p.me ? A.PAL.orange : A.PAL.cream; ctx.strokeStyle = A.PAL.ink; ctx.lineWidth = 1.5; ctx.lineJoin = 'round';
+  const dx = x < 36 ? -1 : x > W - 6 ? 1 : 0, dy = y <= -20 ? -1 : y >= H + 20 ? 1 : 0; const ang = Math.atan2(dy, dx); ctx.rotate(ang);
+  ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-5, -7); ctx.lineTo(-5, 7); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.rotate(-ang);
+  const label = `${p.name} ${fmt(Math.max(0, p.j.y))} m`; ctx.font = `700 10px ${A.SYS}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 3;
+  const ty = top ? 16 : -16; ctx.strokeText(label, 0, ty); ctx.fillText(label, 0, ty); ctx.restore();
 }
 
+function drawEnding(T) {
+  const r = G.round, W = G.W, H = G.H, n = r.players.length; const gy = H * 0.66;
+  const sp = Math.min(W / (n + 0.6), 96), u = clamp(sp * 0.3, 9, 22);
+  ctx.fillStyle = A.PAL.c1; drawGroundBack(gy, W, H);
+  const xs = r.players.map((_, i) => W / 2 + (i - (n - 1) / 2) * sp);
+  r.players.forEach((p, i) => {
+    const x = xs[i];
+    if (p.crashed) { A.drawFigure(ctx, { x, y: gy - u * 0.5, u, face: p.look.face, suit: p.look.suit, helmet: p.look.helmet, pose: A.poseFor('crash', 0), rot: Math.PI }); }
+    else A.drawFigure(ctx, { x, y: gy - A.STAND_H * u, u, face: p.look.face, suit: p.look.suit, helmet: p.look.helmet, pose: A.poseFor(p.look.pose, T + i) });
+  });
+  ctx.fillStyle = A.PAL.c1; ctx.fillRect(0, gy, W, H - gy);
+  ctx.strokeStyle = A.PAL.gold; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, gy + 0.5); ctx.lineTo(W, gy + 0.5); ctx.stroke();
+  const k = G.t;
+  for (const d of G.dust) {
+    const age = k - d.t0; if (age > 1.8) continue; const x = xs[d.i], a = clamp(1 - age / 1.8, 0, 1);
+    const dir = Math.cos(d.a) * (d.i % 2 ? 1 : -1) * 0 + Math.cos(d.a * 2);
+    ctx.globalAlpha = a * 0.7; ctx.fillStyle = A.PAL.cream; ctx.beginPath(); ctx.arc(x + dir * age * 40 * d.s, gy - Math.abs(Math.sin(d.a)) * age * 26 * d.s, d.r * (1 + age), 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  r.players.forEach((p, i) => {
+    ctx.font = `700 11px ${A.SYS}`; ctx.lineWidth = 3; ctx.strokeStyle = A.PAL.ink; ctx.lineJoin = 'round';
+    const y = gy + 20; ctx.strokeText(p.name, xs[i], y); ctx.fillStyle = p.me ? A.PAL.orange : A.PAL.cream; ctx.fillText(p.name, xs[i], y);
+    ctx.font = `11px ${A.SYS}`; ctx.fillStyle = p.crashed ? '#d9604f' : A.PAL.green; ctx.fillText(p.crashed ? 'Crashed' : 'x' + p.out.mult.toFixed(2), xs[i], y + 15);
+  });
+}
+function drawGroundBack(gy, W, H) { const off = 0; for (let k = 0; k < 7; k++) { const x = ((k * 173 + 40 + off) % (W + 160)) - 60; const s = 40 + (k % 3) * 14; if (k % 3 === 0) A.drawHouse(ctx, x, gy, s, 2); else A.drawTree(ctx, x, gy, s, 2); } }
+
+function draw(T) {
+  const W = G.W, H = G.H; ctx.setTransform(G.dpr, 0, 0, G.dpr, 0, 0);
+  const r = G.round, ending = G.state === 'ending' || G.state === 'result';
+  let close = 0.2;
+  if (r && !ending) { let mn = 1e9; for (const p of r.players) if (!p.j.landed) mn = Math.min(mn, p.j.y); close = clamp(1 - mn / 800, 0, 1); } else if (ending) close = 1;
+  drawSky(T); drawGlow(close);
+  if (ending && r) { drawEnding(T); return; }
+  if (!r) { // waiting scene: a diver on the ground
+    const gy = H * 0.7; drawGround(gy);
+    if (store.s) { const u = unit() * 1.4; const look = lookOf(equippedCfg()); A.drawFigure(ctx, { x: W / 2, y: gy - A.STAND_H * u, u, face: look.face, suit: look.suit, helmet: look.helmet, pose: A.poseFor(look.pose, T) }); }
+    return;
+  }
+  const gy = sy(0);
+  if (G.camAlt <= C.groundVisibleM) drawGround(gy);
+  const pl = r.players.slice().sort((a, b) => (a.me ? 1 : 0) - (b.me ? 1 : 0));
+  const top = sy(r.h);
+  if (G.camAlt > r.h - 400) A.drawPlane(ctx, sxOf(0) - 60 + (G.t - r.t0) * 0, top - 20, unit() * 1.6, find('plane', store.s.equipped.plane).look, T, 2);
+  for (const p of pl) {
+    const y = sy(p.j.y) ; if (y < -140 || y > H + 140) continue;
+    if (p.j.landed && G.camAlt > C.groundVisibleM) continue;
+    drawPlayer(p, sxOf(p.x), y, T, p.me ? A.PAL.orange : A.PAL.cream);
+  }
+  drawRuler(T);
+  for (const p of r.players) if (!p.j.landed) drawArrow(p);
+}
+
+// ---------- main loop ----------
+let last = performance.now();
 function frame(now) {
-  const real = Math.min(0.1, (now - (G.last || now)) / 1000); G.last = now; G.t += real;
-  const r = G.round;
-  if (r && r.endList) { r.endT += real; if (G.state === 'ending' && r.endT >= C.endHold) showResults(); }
-  if (r && G.state !== 'idle' && G.state !== 'result' && G.state !== 'ending') {
-    // time scale: slow motion beat, fast forward after you land
-    let ts = 1;
-    if (G.slow > 0) { G.slow -= real; ts = G.slow > 0.15 ? C.slowmoScale : lerp(1, C.slowmoScale, clamp(G.slow / 0.15, 0, 1)); }
-    else {
-      const live = [r.me, ...r.bots.map((b) => b)].filter((e) => !e.j.landed);
-      if (live.length && live.every((e) => e.j.opened && e.j.y > C.groundVisibleM + 22)) ts = C.chuteWarp;
-    }
-    if (ts === 1 && G.state === 'landed' && r.me.landed && r.bots.some((b) => !b.done) && r.t > (r.fastFrom ?? (r.fastFrom = r.t + 1.0))) ts = C.fastForward;
-    G.timeScale = G.timeScale + (ts - G.timeScale) * Math.min(1, real * 8);
-    ts = G.timeScale;
-    G.acc += real * ts; let n = 0;
-    while (G.acc >= 1 / 60 && n < 14) { simStep(1 / 60); G.acc -= 1 / 60; n++; if (G.state === 'result') break; }
-    if (G.acc > 0.25) G.acc = 0;
-  }
-  // camera
-  const f = followed();
-  if (f) {
-    const k = 1 - Math.exp(-real * 3.2);
-    if (G.state === 'idle') { /* fixed */ }
-    G.camX += (f.x - G.camX) * k;
-    G.offA *= Math.exp(-real * 7);
-    G.camAlt = f.j.y + G.offA;
-    if (r && r.endList) { G.camAlt = 0; G.camX = 0; G.offA = 0; }
-  } else { G.camAlt = 900; G.camX += real * 2; }
-  G.ease = Math.max(0, G.ease - real / 0.7);
-  G.shake *= Math.exp(-real * 6);
-  // spectate auto-switch
-  if (r && !r.endList) {
-    if (G.watch >= 0 && r.bots[G.watch].done) switchWatch(highestBot(), false);
-    else if (G.watch < 0 && r.me.j.landed && !r.autoGo && r.t > r.meLandT + 1.0) { r.autoGo = true; const hb = highestBot(); if (hb >= 0) switchWatch(hb, false); }
-  }
-  render(real);
-  hud(real);
   requestAnimationFrame(frame);
-}
-
-let lastShownMult = '', lastBots = 0;
-function hud(dt) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; const T = now / 1000;
+  if (!store.s) { draw(T); return; }
   const r = G.round;
-  // balance roll-up
-  const target = store.balance;
-  if (G.balShown !== target) {
-    if (reduce) G.balShown = target;
-    else { const d = target - G.balShown; G.balShown += Math.sign(d) * Math.max(1, Math.abs(d) * Math.min(1, dt * 3.2)); if (Math.abs(target - G.balShown) < 1) G.balShown = target; }
+  if (r && G.state === 'fall') {
+    let left = dt * G.timeScale; while (left > 1e-6 && G.state === 'fall') { const d = Math.min(left, 1 / 120); simStep(d); left -= d; }
+    if (!G.target || !falling(G.target)) { if (!meDone()) G.target = r.me; else retarget(); }
+    roundUi();
+    const tj = G.target ? G.target.j : r.me.j;
+    G.camAlt += (tj.y - G.camAlt) * (1 - Math.exp(-dt * (G.target && G.target.me ? 16 : 7)));
+    G.camX += ((G.target ? G.target.x : 0) - G.camX) * (1 - Math.exp(-dt * 6));
+    const fallen = G.target ? G.target.j.fallen : 0;
+    $('big').textContent = fmt(fallen);
+    const nl = $('nowline');
+    if (G.target && (G.target.j.opened)) nl.textContent = 'Opened at x' + S.multiplierAt(G.target.j.openFallen).toFixed(2);
+    else nl.textContent = ''; if (G.target && !G.target.j.opened) { nl.textContent = ''; const b = document.createElement('b'); b.textContent = 'x' + S.multiplierAt(G.target.j.fallen).toFixed(2); nl.append(G.target.me ? 'Open now ' : 'They open now at ', b); }
+    sfx.wind(G.target && !G.target.j.opened ? G.target.j.v / C.terminalSpeed : G.target ? 0.15 : 0);
+    if (G.t - G.lbT > 0.2) { G.lbT = G.t; lbRender(false); }
+  } else if (G.state === 'ending') {
+    G.t += dt; G.endT -= dt; if (G.endT <= 0) showResults();
+  } else if (G.state === 'result') G.t += dt;
+  else { // idle
+    G.t += dt;
+  }
+  // tokens roll up with coin ticks
+  const diff = store.balance - G.balShown;
+  if (Math.abs(diff) >= 1) {
+    G.balShown += Math.abs(diff) < 2 ? diff : diff * Math.min(1, dt * 5) + Math.sign(diff);
+    G.coinAcc += dt; if (G.coinAcc > 0.045 && diff > 0) { G.coinAcc = 0; sfx.coin(G.coinN++); }
     $('balv').textContent = fmt(G.balShown);
-  }
-  if (!r || G.state === 'idle') return;
-  const j = r.me.j;
-  const m = S.multiplierAt(j.opened ? j.openFallen : j.fallen);
-  const txt = m.toFixed(2) + 'x';
-  if (txt !== lastShownMult) {
-    lastShownMult = txt; const el = $('mult'); el.textContent = txt;
-    el.style.color = heat(m); el.style.fontSize = Math.round((innerWidth >= 700 ? 80 : 64) * (1 + Math.min(0.5, (m - 1) * 0.03))) + 'px';
-    const mi = Math.floor(m);
-    if (!j.opened && mi > G.lastMultInt) { G.lastMultInt = mi; if (!reduce) el.animate([{ transform: 'scale(1.16)' }, { transform: 'scale(1)' }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' }); }
-  }
-  // audio follows whoever you watch
-  const f = followed(); const sp = f.j.landed ? 0 : f.j.v;
-  sfx.setWind(G.state === 'result' ? 0 : sp / C.terminalSpeed);
-  sfx.heart(dt, m, G.state === 'fall');
-  // bot list ~5x a second
-  G.hudT += dt;
-  if (G.hudT > 0.18) {
-    G.hudT = 0;
-    $('botlist').innerHTML = r.bots.map((b) => {
-      const mm = S.multiplierAt(b.j.opened ? b.j.openFallen : b.j.fallen).toFixed(2) + 'x';
-      const cls = b.done ? (b.result.win ? 'd' : 'x') : (b.j.opened ? 'd' : '');
-      const st = b.done ? (b.result.win ? mm : 'crash') : mm;
-      return `<div class="${cls}"><span>${b.name}</span><span>${short(b.bet)}</span><span>${st}</span></div>`;
-    }).join('');
-    if (G.state === 'chute' || G.state === 'landed') {
-      const wt = $('watch'); const wb = G.watch >= 0 ? r.bots[G.watch] : null;
-      if (wb) wt.textContent = `Watching ${wb.name}`;
-      else if (G.state === 'chute') wt.textContent = j.v > C.safeLanding + 0.2 ? `Braking, ${Math.round(j.v)} m/s` : 'Safe speed';
-      else wt.textContent = '';
-      wt.classList.toggle('hide', !wt.textContent);
-    }
-    updateButtons();
-  }
+  } else if (diff !== 0 || $('balv').textContent !== fmt(store.balance)) { G.balShown = store.balance; $('balv').textContent = fmt(G.balShown); G.coinN = 0; }
+  pvDraw(false);
+  draw(T);
 }
 
-// ---------------------------------------------------------------- spectate
-function airList() { const r = G.round; if (!r) return []; const l = []; if (!r.me.j.landed) l.push(-1); r.bots.forEach((b, i) => { if (!b.done) l.push(i); }); return l; }
-function highestBot() { const r = G.round; let best = -1, y = -1; if (!r) return -1; r.bots.forEach((b, i) => { if (!b.done && b.j.y > y) { y = b.j.y; best = i; } }); return best; }
-function cycle(dir) { const l = airList(); if (l.length < 2) return; let k = l.indexOf(G.watch); if (k < 0) k = 0; switchWatch(l[(k + dir + l.length) % l.length]); sfx.click(); }
-function inflight() { const r = G.round; return r ? r.bots.map((b, i) => (b.done ? -1 : i)).filter((i) => i >= 0) : []; }
-function nextWatch(cur) { const l = inflight(); const nx = l.find((i) => i > cur); return nx === undefined ? -1 : nx; }
-function switchWatch(idx, userAction = true) {
-  const r = G.round; const old = followed(); G.watch = idx; const nw = followed();
-  if (old && nw) G.offA = (old.j.y + G.offA) - nw.j.y;
-  updateButtons();
-}
-
-// ---------------------------------------------------------------- UI
-function openPanel(el) { el.classList.remove('hide'); el.classList.add('enter'); void el.offsetWidth; requestAnimationFrame(() => el.classList.remove('enter')); }
-function closePanel(el, cb) { el.classList.add('enter'); const done = () => { el.classList.add('hide'); el.classList.remove('enter'); cb && cb(); }; reduce ? done() : setTimeout(done, 260); }
-
-function setUI() {
-  const st = G.state, r = G.round;
-  const idle = st === 'idle', fall = st === 'fall', chute = st === 'chute', landed = st === 'landed', res = st === 'result';
-  const endg = st === 'ending';
-  $('mult').classList.toggle('hide', idle || endg);
-  $('openbtn').classList.toggle('hide', !fall);
-  $('driftpad').classList.toggle('hide', !(fall || chute));
-  $('botlist').classList.toggle('hide', idle || endg);
-  if (endg) $('watch').classList.add('hide');
-  document.querySelector('.btns').classList.toggle('hide', !(idle || res));
-  if (idle) { $('mult').classList.remove('locked'); $('watch').classList.add('hide'); $('botlist').innerHTML = ''; }
-  if (fall) { $('watch').classList.add('hide'); }
-  updateButtons();
-  renderHistory(); renderTop();
-}
-function updateButtons() {
-  const st = G.state, l = inflight();
-  const al = airList(); const canWatch = (st === 'chute' || st === 'landed') && al.length >= 2;
-  $('specbtn').classList.toggle('hide', !canWatch);
-  if (canWatch) $('specbtn').textContent = 'Next player';
-  $('skipbtn').classList.toggle('hide', !(st === 'landed' && l.length > 0));
-  const dp = $('driftpad'); dp.classList.toggle('hide', !(st === 'fall' || ((st === 'chute' || st === 'landed') && al.length >= 2)));
-  dp.firstElementChild.textContent = st === 'fall' ? 'Swipe or use arrow keys to drift' : 'Tap or arrow keys to switch player';
-}
-function renderTop() {
-  const s = store.s.streak; $('streakchip').textContent = s >= 2 ? `Day ${s} streak` : '';
-  $('balv').textContent = fmt(G.balShown);
-}
-function renderHistory() {
-  const h = store.s.history; const el = $('hist');
-  el.innerHTML = h.length ? h.map((x) => `<span class="chip ${x.win ? 'win' : 'crash'}" style="color:${heat(1 + x.h / 100 / 1.5)}">${fmt(x.h)}</span>`).join('') : '<span class="lbl">Your jumps will show here</span>';
-}
-
-// bet panel
-function betVal() { return parseInt(($('bet').value || '').replace(/[^0-9]/g, ''), 10) || 0; }
-function setBet(v) { $('bet').value = fmt(clamp(v, 0, 1e9)); checkBet(); }
-function checkBet() {
-  const v = betVal(), b = store.balance; const e = $('beterr'); let msg = '';
-  if (b < C.minBet) msg = 'You are out of tokens.';
-  else if (v < C.minBet) msg = `Minimum bet is ${C.minBet}.`; else if (v > b) msg = `You only have ${fmt(b)} tokens.`;
-  e.textContent = msg; $('jump').style.opacity = msg ? 0.5 : 1; return !msg;
-}
-function buildChips() {
-  const el = $('chips'); el.innerHTML = '';
-  if (store.balance < C.minBet) {
-    const b = document.createElement('button'); b.textContent = `Take ${fmt(C.rescueTokens)} tokens`; b.onclick = () => { store.add(C.rescueTokens); G.balShown = store.balance; setBet(Math.min(500, store.balance)); buildChips(); renderTop(); }; el.appendChild(b); return;
-  }
-  [['100', () => 100], ['500', () => 500], ['1,000', () => 1000], ['Half', () => Math.floor(store.balance / 2 / 10) * 10], ['Max', () => store.balance]].forEach(([l, f]) => {
-    const b = document.createElement('button'); b.textContent = l; b.onclick = () => { sfx.click(); setBet(f()); }; el.appendChild(b);
-  });
-}
-function stepBet(dir) { const v = betVal(); const st = Math.max(10, Math.round(v * 0.1 / 10) * 10); setBet(clamp(v + dir * st, 0, store.balance)); }
-function showBet() {
-  const s = store.s.settings.lastBet; setBet(Math.min(s || 500, Math.max(C.minBet, store.balance)));
-  buildChips(); checkBet(); openPanel($('betp'));
-}
-function jump() {
-  if (G.state !== 'idle' || !checkBet()) return;
-  sfx.init(); if (sfx.ctx && sfx.ctx.state === 'suspended') sfx.ctx.resume();
-  const bet = betVal(); store.setting('lastBet', bet);
-  closePanel($('betp'));
-  G.balShown = store.balance; lastShownMult = '';
-  startRound(bet);
-  $('mult').classList.remove('locked'); $('mult').style.color = '#fff';
-  $('watch').classList.add('hide');
-}
-function nextRound() {
-  endMode = false; layout();
-  sfx.click();
-  closePanel($('resp'), () => {
-    G.state = 'idle'; G.round = null; G.watch = -1; G.parts = []; G.lines = []; G.trail = []; $('mult').classList.remove('locked');
-    setUI(); showBet();
-  });
-}
-
-// shop
-let shopTab = 'chute';
-function renderShop() {
-  $('shopbal').textContent = fmt(store.balance) + ' tokens';
-  const tabs = $('tabs'); tabs.innerHTML = '';
-  for (const [cat, name] of CATEGORIES) { const b = document.createElement('button'); b.textContent = name; b.className = cat === shopTab ? 'on' : ''; b.onclick = () => { shopTab = cat; renderShop(); }; tabs.appendChild(b); }
-  const grid = $('grid'); grid.innerHTML = '';
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  for (const it of CATALOG[shopTab]) {
-    const owned = store.owns(it.id), eq = store.equipped(shopTab) === it.id;
-    const card = document.createElement('div'); card.className = 'card' + (eq ? ' eq' : '');
-    const c = document.createElement('canvas'); c.className = 'im'; c.width = 300 * dpr; c.height = 240 * dpr; card.appendChild(c);
-    const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = it.name; card.appendChild(nm);
-    const b = document.createElement('button');
-    if (eq) { b.textContent = 'Equipped'; b.className = 'eqb'; }
-    else if (owned) { b.textContent = 'Equip'; b.onclick = () => { store.equip(shopTab, it.id); sfx.click(); renderShop(); }; }
-    else {
-      b.textContent = fmt(it.price) + ' tokens'; const can = store.balance >= it.price; b.className = can ? 'buy' : 'poor';
-      b.onclick = () => {
-        if (!can) { toast('Not enough tokens yet'); return; }
-        const res = store.buy(shopTab, it.id);
-        if (res === 'ok') { sfx.coin(2); toast(`Bought ${it.name}`, 'Undo', () => { store.undoBuy(); renderShop(); renderTop(); }); const a = store.checkAch(null); a.forEach((x) => toast(`Achievement: ${x.name}`)); G.balShown = store.balance; renderShop(); renderTop(); }
-      };
-    }
-    card.appendChild(b); grid.appendChild(card);
-    const sk = SKY(); const bgc = shopTab === 'bg' ? it.sky : null;
-    art.preview(c, shopTab, it.id, bgc, { suit: store.equipped('suit'), helmet: store.equipped('helmet'), frame: 'a' });
-    if (shopTab !== 'bg') c.style.background = shopTab === 'trail' ? '#26334f' : `linear-gradient(${sk.sky[0]},${sk.sky[1]})`;
-  }
-  $('grid').scrollTop = 0;
-  if (shopTab === 'emote' && !art.get('diver_suit_classic_emo_wave_a') && (G.emoTry = (G.emoTry || 0) + 1) < 8) setTimeout(() => { if (shopTab === 'emote' && !$('shop').classList.contains('hide')) renderShop(); }, 500);
-}
-function openShop() { renderShop(); openPanel($('shop')); }
-
-// records
-function renderRecords() {
-  const b = store.s.best, s = store.s;
-  const kv = (a, v) => `<div class="kv"><span>${a}</span><b>${v}</b></div>`;
-  const bests = kv('Best multiplier', b.mult ? b.mult.toFixed(2) + 'x' : 'none yet') + kv('Biggest payout', b.payout ? fmt(b.payout) : 'none yet') + kv('Longest win streak', b.winStreak) +
-    kv('Lowest safe open', b.lowOpen === null ? 'none yet' : fmt(b.lowOpen) + ' m') + kv('Tallest jump landed', b.tallest ? fmt(b.tallest) + ' m' : 'none yet') +
-    kv('Rounds played', fmt(b.rounds)) + kv('Wins / crashes', `${b.wins} / ${b.crashes}`) + kv('Days in a row', s.streak);
-  const ach = ACH.map((a) => { const got = s.ach[a.id]; return `<div class="ach${got ? '' : ' lock'}"><div><b>${a.name}</b><span>${a.desc}</span></div>${got ? '<i>Done</i>' : ''}</div>`; }).join('');
-  $('recbody').innerHTML = `<div class="sec">Personal bests</div><div class="panel">${bests}</div><div class="sec">Achievements, ${Object.keys(s.ach).length} of ${ACH.length}</div>${ach}`;
-}
-
-// daily claim
-function showClaim() {
-  const c = store.claim; if (!c) return;
-  $('claimamt').textContent = '+' + fmt(c.bonus + c.extra);
-  $('claimsub').textContent = c.streak >= 2 ? `Day ${c.streak} in a row. That is ${fmt(c.bonus)} plus ${fmt(c.extra)} for the streak.` : 'Welcome back. Come again tomorrow for a streak bonus.';
-  openPanel($('claim'));
-}
-
-// ---------------------------------------------------------------- wiring
-function wire() {
-  $('betminus').onclick = () => { sfx.click(); stepBet(-1); }; $('betplus').onclick = () => { sfx.click(); stepBet(1); };
-  $('bet').addEventListener('input', () => { const v = betVal(); $('bet').value = v ? fmt(v) : ''; checkBet(); });
-  $('bet').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('bet').blur(); jump(); } e.stopPropagation(); });
-  $('jump').onclick = jump; $('again').onclick = nextRound;
-  $('openbtn').onclick = (e) => { e.stopPropagation(); doOpen(); };
-  $('specbtn').onclick = () => cycle(1);
-  $('skipbtn').onclick = () => { const r = G.round; if (!r) return; let n = 0; while (!r.bots.every((b) => b.done) && n++ < 6000) { for (const b of r.bots) if (!b.done) S.stepBot(b, 1 / 30); } r.bots.forEach((b) => { b.reported = true; }); };
-  $('btnshop').onclick = () => { if (G.state === 'idle' || G.state === 'result') openShop(); };
-  $('shopx').onclick = () => { closePanel($('shop')); renderTop(); const b = $('bet'); if (G.state === 'idle') { buildChips(); checkBet(); } };
-  $('btnrec').onclick = () => { if (G.state === 'idle' || G.state === 'result') { renderRecords(); openPanel($('rec')); } }; $('recx').onclick = () => closePanel($('rec'));
-  $('btnset').onclick = () => { applySettings(); openPanel($('set')); }; $('setx').onclick = () => closePanel($('set'));
-  $('setreduce').onclick = () => { reduce = !reduce; store.setting('reduce', reduce); applySettings(); };
-  $('setsound').onclick = () => { store.setting('sound', !store.s.settings.sound); applySettings(); sfx.init(); };
-  document.querySelectorAll('#settheme button').forEach((b) => { b.onclick = () => { store.setting('theme', b.dataset.v); applySettings(); }; });
-  $('claimbtn').onclick = () => {
-    sfx.init(); const before = store.balance; const total = store.claimBonus(); G.balShown = before; sfx.coin(1); sfx.coin(3);
-    closePanel($('claim')); renderTop(); store.checkAch(null).forEach((a) => toast(`Achievement: ${a.name}`));
-  };
-  // keyboard
-  const keys = {};
-  addEventListener('keydown', (e) => {
-    if (e.target && e.target.tagName === 'INPUT') return;
-    if ((G.state === 'chute' || G.state === 'landed') && ['ArrowLeft', 'ArrowRight', 'a', 'd'].includes(e.key)) { if (!e.repeat) cycle(e.key === 'ArrowLeft' || e.key === 'a' ? -1 : 1); return; }
-    if (e.key === 'ArrowLeft' || e.key === 'a') { keys.l = 1; } else if (e.key === 'ArrowRight' || e.key === 'd') { keys.r = 1; }
-    else if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); if (G.state === 'fall') doOpen(); else if (G.state === 'idle' && document.activeElement === document.body && !$('betp').classList.contains('hide')) jump(); }
-    else if (e.key === 'Enter' && G.state === 'result') nextRound();
-    G.input.key = (keys.r ? 1 : 0) - (keys.l ? 1 : 0);
-  });
-  addEventListener('keyup', (e) => {
-    if (e.key === 'ArrowLeft' || e.key === 'a') keys.l = 0; if (e.key === 'ArrowRight' || e.key === 'd') keys.r = 0;
-    G.input.key = (keys.r ? 1 : 0) - (keys.l ? 1 : 0);
-  });
-  // touch / mouse on the canvas: tap opens, swipe drifts
-  let down = null;
-  cv.addEventListener('pointerdown', (e) => { down = { id: e.pointerId, x: e.clientX, t: performance.now(), moved: false }; cv.setPointerCapture(e.pointerId); });
-  cv.addEventListener('pointermove', (e) => { if (!down || e.pointerId !== down.id) return; const dx = e.clientX - down.x; if (Math.abs(dx) > 12) down.moved = true; if (down.moved && G.state === 'fall') G.input.touch = clamp(dx / 45, -1, 1); });
-  const up = (e) => { if (!down || e.pointerId !== down.id) return; const dx = e.clientX - down.x; if (!down.moved && performance.now() - down.t < 450 && G.state === 'fall') doOpen(); else if (G.state === 'chute' || G.state === 'landed') cycle(down.moved && dx > 0 ? -1 : 1); G.input.touch = 0; down = null; };
-  cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
-  document.addEventListener('visibilitychange', () => { if (document.hidden) { G.input.key = 0; G.input.touch = 0; } });
-  addEventListener('beforeunload', () => store.save());
-}
-
-// ---------------------------------------------------------------- boot
+// ---------- start up ----------
 async function boot() {
-  applySettings(); wire();
-  const bar = document.querySelector('#loadbar i');
-  try { await art.load((p) => { bar.style.width = Math.round(p * 100) + '%'; }); }
-  catch (e) { G.error = String(e); console.error(e); }
-  art.loadEmotes();
-  G.ready = true; $('loading').classList.add('done'); setTimeout(() => $('loading').remove(), 400);
-  renderTop(); renderHistory(); setUI();
-  if (store.abandoned) toast(`Last round was left unfinished. You lost the ${fmt(store.abandoned)} bet.`);
-  if (store.claim) { showClaim(); } 
-  showBet();
+  const bar = $('loadbar'), txt = $('loadtxt'); const step = (p, t) => { bar.style.width = p + '%'; txt.textContent = t; };
+  step(20, 'Loading fonts');
+  try { await Promise.race([document.fonts.load('40px "Kaushan Script"'), new Promise((r) => setTimeout(r, 4000))]); } catch (e) { /* font falls back */ }
+  step(55, 'Drawing the sky'); resize(); A.cloudSprites(); A.moon(ctx, 0, 0, 20);
+  step(85, 'Loading your profile');
+  G.balShown = store.balance;
   requestAnimationFrame(frame);
+  step(100, 'Ready');
+  setTimeout(() => show($('loading'), false), 150);
+  if (!store.hasProfile) openStart(false);
+  else { refreshAll(); if (store.claim) openClaim(); else toBet(); }
 }
-window.addEventListener('error', (e) => { window.__errs = (window.__errs || []).concat(e.message); });
-window.addEventListener('unhandledrejection', (e) => { window.__errs = (window.__errs || []).concat(String(e.reason)); });
+Object.assign(window.__ff, { doOpen, startRound, showResults, openSettings, openShop });
 boot();
-window.__ff.doOpen = doOpen; window.__ff.startRound = startRound; window.__ff.showResults = showResults;

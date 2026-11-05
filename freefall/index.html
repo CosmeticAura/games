@@ -4,85 +4,159 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#4f9be8">
+<meta name="theme-color" content="#14161a">
 <title>Freefall</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<canvas id="c"></canvas>
-<div id="flash"></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-shop" viewBox="0 0 24 24"><path d="M5 8h14l-1 12H6L5 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></symbol>
+    <symbol id="i-rec" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></symbol>
+    <symbol id="i-set" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-locker" viewBox="0 0 24 24"><path d="M6 3h12v18H6z"/><path d="M12 3v18M9.5 11v2M14.5 11v2"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+    <symbol id="i-fwd" viewBox="0 0 24 24"><path d="M5 5l7 7-7 7M13 5l7 7-7 7"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-5 4-7 8-7s7 2 8 7"/></symbol>
+    <symbol id="i-chute" viewBox="0 0 24 24"><path d="M3 11a9 8 0 0 1 18 0c-2-1.5-4-1.5-6 0-1.5-1.5-4.5-1.5-6 0-2-1.5-4-1.5-6 0z"/><path d="M5 12l7 9 7-9"/></symbol>
+  </defs>
+</svg>
 
-<div id="hud">
-  <div id="topbar">
-    <div id="bal"><span class="lbl">Tokens</span><b id="balv">0</b><i id="streakchip"></i></div>
-    <div class="btns">
-      <button id="btnshop" class="pill">Shop</button>
-      <button id="btnrec" class="pill">Records</button>
-      <button id="btnset" class="pill">Settings</button>
+<div id="loading">
+  <h1 class="disp">Freefall</h1>
+  <div id="loadtrack"><div id="loadbar"></div></div>
+  <p id="loadtxt">Starting</p>
+</div>
+
+<div id="app">
+  <main id="stage">
+    <canvas id="c"></canvas>
+
+    <div id="hud">
+      <div id="topbar">
+        <div id="bal" class="bezel"><span class="lbl">Tokens</span><b id="balv">0</b><i id="streakchip"></i></div>
+        <div class="btns">
+          <button id="btnshop" class="pill"><svg class="ic"><use href="#i-shop"/></svg><span>Shop</span></button>
+          <button id="btnrec" class="pill"><svg class="ic"><use href="#i-rec"/></svg><span>Records</span></button>
+          <button id="btnset" class="pill"><svg class="ic"><use href="#i-set"/></svg><span>Settings</span></button>
+        </div>
+      </div>
+      <div id="histwrap"><span class="lbl">Flight log</span><div id="hist"></div></div>
+
+      <div id="bigwrap" class="hide">
+        <div id="big">0</div>
+        <div id="bigu">m fallen</div>
+        <div id="nowline"></div>
+      </div>
+      <div id="watch" class="hide"></div>
     </div>
-  </div>
-  <div id="histwrap"><span class="lbl">Last jumps, m</span><div id="hist"></div></div>
-  <div id="mult" class="hide">1.00x</div>
-  <div id="watch" class="hide"></div>
-  <div id="pops"></div>
-  <div id="botlist"></div>
+
+    <div id="crashcard" class="card hide">
+      <div class="disp ct">Crashed</div>
+      <div id="crashsub"></div>
+      <button id="crashx" class="pill small">Keep watching</button>
+    </div>
+    <div id="chutecard" class="card hide"></div>
+
+    <div id="bottombar">
+      <button id="specprev" class="pill hide" aria-label="Previous player"><svg class="ic"><use href="#i-prev"/></svg></button>
+      <button id="skipbtn" class="pill hide"><svg class="ic"><use href="#i-fwd"/></svg><span>Skip to results</span></button>
+      <button id="specnext" class="pill hide" aria-label="Next player"><svg class="ic"><use href="#i-next"/></svg></button>
+      <button id="openbtn" class="big hide"><svg class="ic"><use href="#i-chute"/></svg><span>Open chute</span><small>tap anywhere, or press space</small></button>
+      <div id="driftpad" class="hide"><span>Drag or use arrow keys to drift</span></div>
+    </div>
+  </main>
+
+  <aside id="panel">
+    <button id="paneltab" aria-label="Show round panel"><span>Round</span></button>
+    <div class="pbody">
+      <section class="psec">
+        <h3 class="lbl">This round</h3>
+        <div id="lb"></div>
+      </section>
+      <section class="psec">
+        <h3 class="lbl">My diver</h3>
+        <div id="pvname"></div>
+        <canvas id="pv" width="240" height="250"></canvas>
+        <button id="btnlocker" class="pill wide"><svg class="ic"><use href="#i-locker"/></svg><span>Locker</span></button>
+      </section>
+    </div>
+  </aside>
 </div>
 
-<div id="bottombar">
-  <button id="specbtn" class="pill hide">Spectate</button>
-  <button id="skipbtn" class="pill hide">Skip to results</button>
-  <button id="openbtn" class="big hide">Open chute<small>tap anywhere, or press space</small></button>
-  <div id="driftpad" class="hide"><span>Swipe or use arrow keys to drift</span></div>
-</div>
-
-<section id="betp" class="sheet">
-  <h1>Freefall</h1>
-  <p class="sub">You jump from a hidden height. The multiplier climbs 1.00x per 100 m. Open late to win big, but open early enough to slow down before the ground.</p>
-  <label for="bet">Your bet</label>
-  <div class="stepper"><button id="betminus" class="round" aria-label="Lower bet">-</button><input id="bet" type="text" inputmode="numeric" autocomplete="off" value="500"><button id="betplus" class="round" aria-label="Raise bet">+</button></div>
+<section id="betp" class="sheet hide ticket">
+  <header class="tkhead"><span class="disp">Jump ticket</span><span id="tkno" class="mono"></span></header>
+  <div class="tkrow"><span class="lbl">Passenger</span><b id="tkname"></b></div>
+  <div class="tkrow"><span class="lbl">Rule</span><span id="tkrule">Open the chute before you reach the ground. The deeper you open, the more it pays.</span></div>
+  <label class="lbl" for="bet">Bet</label>
+  <div class="stepper"><button id="betminus" class="round" aria-label="Lower bet">-</button><input id="bet" type="text" inputmode="numeric" autocomplete="off" value="100"><button id="betplus" class="round" aria-label="Raise bet">+</button></div>
   <div id="chips"></div>
   <div id="beterr"></div>
-  <button id="jump" class="big">Jump</button>
+  <div id="abandoned" class="note hide"></div>
+  <div class="tkperf"></div>
+  <button id="jump" class="big"><span>Jump</span></button>
+  <button id="rescue" class="pill wide hide">Take 1,000 tokens</button>
 </section>
 
 <section id="resp" class="sheet hide">
-  <h2 id="restitle">Landed</h2>
+  <h2 id="restitle" class="disp">Landed</h2>
   <p id="ressub" class="sub"></p>
-  <div id="resbig"></div>
+  <div id="resbig" class="mono"></div>
   <div id="restbl"></div>
-  <button id="again" class="big">Next round</button>
+  <button id="again" class="big"><span>Next round</span></button>
+</section>
+
+<section id="startp" class="page hide">
+  <div class="startbox">
+    <h1 class="disp">Freefall</h1>
+    <p class="sub">Pick a name and a face. Saved on this device only.</p>
+    <label class="lbl" for="uname">Username</label>
+    <input id="uname" type="text" maxlength="16" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="3 to 16 letters, numbers, _">
+    <div id="uerr" class="err"></div>
+    <span class="lbl">Face</span>
+    <div id="faces"></div>
+    <span class="lbl">Starter suit</span>
+    <div id="suits"></div>
+    <button id="playbtn" class="big"><span>Play</span></button>
+    <button id="startcancel" class="pill wide hide">Back</button>
+  </div>
+</section>
+
+<section id="claimp" class="sheet hide">
+  <h2 class="disp">Daily claim</h2>
+  <div id="claimamt" class="mono"></div>
+  <p id="claimsub" class="sub"></p>
+  <button id="claimbtn" class="big"><span>Claim</span></button>
 </section>
 
 <section id="shop" class="page hide">
-  <header><h2>Shop</h2><span id="shopbal"></span><button id="shopx" class="pill">Done</button></header>
+  <header><h2 id="shoptitle" class="disp">Shop</h2><span id="shopbal" class="mono"></span><button id="shopx" class="pill"><svg class="ic"><use href="#i-x"/></svg><span>Done</span></button></header>
   <nav id="tabs"></nav>
   <div id="grid"></div>
 </section>
 
-<section id="rec" class="page hide">
-  <header><h2>Records</h2><span></span><button id="recx" class="pill">Done</button></header>
+<section id="recp" class="page hide">
+  <header><h2 class="disp">Records</h2><button id="recx" class="pill"><svg class="ic"><use href="#i-x"/></svg><span>Done</span></button></header>
   <div id="recbody"></div>
 </section>
 
-<section id="set" class="sheet hide">
-  <h2>Settings</h2>
-  <div class="row"><span>Reduce motion</span><button id="setreduce" class="toggle" role="switch" aria-checked="false"></button></div>
-  <div class="row"><span>Sound</span><button id="setsound" class="toggle" role="switch" aria-checked="true"></button></div>
-  <div class="row"><span>Appearance</span><div class="seg" id="settheme"><button data-v="system">System</button><button data-v="light">Light</button><button data-v="dark">Dark</button></div></div>
-  <button id="setx" class="big">Done</button>
-</section>
-
-<section id="claim" class="modal hide">
-  <div class="card">
-    <h2>Daily bonus</h2>
-    <div id="claimamt">+10,000</div>
-    <p id="claimsub" class="sub"></p>
-    <button id="claimbtn" class="big">Claim</button>
+<section id="setp" class="page hide">
+  <header><h2 class="disp">Settings</h2><button id="setx" class="pill"><svg class="ic"><use href="#i-x"/></svg><span>Done</span></button></header>
+  <div id="setbody">
+    <div class="setrow"><label class="lbl" for="rname">Username</label>
+      <div class="inl"><input id="rname" type="text" maxlength="16" autocomplete="off" autocapitalize="off" spellcheck="false"><button id="rnamebtn" class="pill">Rename</button></div>
+      <div id="rerr" class="err"></div></div>
+    <div class="setrow"><span class="lbl">Volume</span>
+      <div class="inl"><input id="vol" type="range" min="0" max="100" step="1"><button id="mutebtn" class="pill">Mute</button></div></div>
+    <div class="setrow"><span class="lbl">Players on this device</span>
+      <div id="plist"></div>
+      <button id="newplayer" class="pill wide"><svg class="ic"><use href="#i-user"/></svg><span>Switch player</span></button></div>
   </div>
 </section>
 
 <div id="toast" class="hide"></div>
-<div id="loading"><b>Freefall</b><div id="loadbar"><i></i></div></div>
 <script type="module" src="main.js"></script>
 </body>
 </html>
