@@ -17,6 +17,18 @@ export class Art {
     }
     return n;
   }
+  emoteNames() {
+    const n = [];
+    for (const e of CATALOG.emote) for (const v of ['a', 'b']) {
+      const k = `emo_${e.id.slice(6)}_${v}`;
+      for (const s of CATALOG.suit) n.push(`diver_${s.id}_${k}`);
+      for (const h of CATALOG.helmet) n.push(`head_${h.id}_${k}`);
+    }
+    return n;
+  }
+  loadEmotes() {
+    for (const n of this.emoteNames()) { if (this.img[n]) continue; const im = new Image(); im.decoding = 'async'; im.src = `sprites/${n}.png`; this.img[n] = im; }
+  }
   async load(onProgress) {
     this.meta = await (await fetch('sprites/meta.json')).json();
     const list = this.names(); let done = 0;
@@ -57,13 +69,18 @@ export class Art {
     ctx.restore();
   }
   // preview of a catalog item drawn into a small canvas (shop cards)
-  preview(canvas, cat, id, bgColors) {
+  preview(canvas, cat, id, bgColors, extra = {}) {
     const c = canvas.getContext('2d'), W = canvas.width, H = canvas.height; c.clearRect(0, 0, W, H);
     const draw = (n, cx, cy, w, h) => { const i = this.get(n); if (i) c.drawImage(i, cx - w / 2, cy - h / 2, w, h); };
     const s = this.meta.scale, hang = this.meta.pose_hang;
     if (cat === 'chute') { const i = this.get(id); if (i) { const w = W * 0.95; c.drawImage(i, (W - w) / 2, H * 0.5 - (w * i.height / i.width) / 2, w, w * i.height / i.width); } }
     else if (cat === 'plane') { const i = this.get(id); if (i) { const w = W * 0.98; c.drawImage(i, (W - w) / 2, H * 0.5 - (w * i.height / i.width) / 2, w, w * i.height / i.width); } }
     else if (cat === 'suit') { const sz = H * 1.25; const a = this.get(`diver_${id}_hang`), h = this.get('head_helmet_classic_hang'); if (a) { c.drawImage(a, (W - sz) / 2, H * 0.5 - sz * 0.5 - sz * 0.02, sz, sz); if (h) c.drawImage(h, (W - sz) / 2, H * 0.5 - sz * 0.5 - sz * 0.02, sz, sz); } }
+    else if (cat === 'emote') {
+      const k = `emo_${id.slice(6)}_${extra.frame || 'a'}`, sz = H * 1.2;
+      const a = this.get(`diver_${extra.suit || 'suit_classic'}_${k}`), h = this.get(`head_${extra.helmet || 'helmet_classic'}_${k}`);
+      if (a) { c.drawImage(a, (W - sz) / 2, H * 0.52 - sz * 0.5, sz, sz); if (h) c.drawImage(h, (W - sz) / 2, H * 0.52 - sz * 0.5, sz, sz); }
+    }
     else if (cat === 'helmet') {
       const sz = H * 3.2, k = sz / 256, hd = hang.head; const h = this.get(`head_${id}_hang`), a = this.get('diver_suit_classic_hang');
       const ox = W / 2 - hd[0] * k, oy = H * 0.58 - hd[1] * k;

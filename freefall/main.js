@@ -23,7 +23,7 @@ const nowFn = params.get('now') ? () => new Date(params.get('now')) : () => new 
 const store = new Store(localStorage, nowFn);
 const sfx = new Sfx(); const art = new Art();
 const cv = $('c'), ctx = cv.getContext('2d');
-let W = 0, H = 0, anchorY = 0, pxm = 1, cell = 140, mpp = 44;
+let W = 0, H = 0, anchorY = 0, pxm = 1, pxx = 1, cell = 140, mpp = 44, endMode = false;
 
 let reduce = store.s.settings.reduce;
 if (reduce === null) reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -38,7 +38,7 @@ function applySettings() {
 function layout() {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   W = innerWidth; H = innerHeight; cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  anchorY = H * 0.38; pxm = (H - anchorY) / C.groundVisibleM; cell = clamp(H * 0.17, 110, 170); mpp = cell / 3.2;
+  anchorY = endMode ? H * 0.68 : H * 0.38; pxm = (H - H * 0.38) / C.groundVisibleM; pxx = pxm * C.xStretch; cell = clamp(H * 0.17, 110, 170); mpp = cell / 3.2;
 }
 addEventListener('resize', layout); layout();
 
@@ -60,11 +60,11 @@ function startRound(bet) {
   const offs = shuffle(names.map((_, i) => (i - (n - 1) / 2) * (2 * C.botDriftSpread / Math.max(1, n - 1))));
   const bots = names.map((nm, i) => {
     const b = S.makeBot(nm, store.balance, h);
-    Object.assign(b, { x: offs[i], vx: 0, ox: offs[i], nt: 0, face: 1, openT: -1, announced: false, reported: false, phase: Math.random() * 6, look: rndLook() });
+    Object.assign(b, { emo: CATALOG.emote[Math.floor(Math.random() * CATALOG.emote.length)].id, x: offs[i], vx: 0, ox: offs[i], nt: 0, face: 1, openT: -1, announced: false, reported: false, phase: Math.random() * 6, look: rndLook() });
     return b;
   });
-  const me = { j: S.newJumper(h), x: 0, vx: 0, face: 1, openT: -1, phase: 0, look: equippedLook(), bet, landed: false, rec: null };
-  G.round = { h, bet, me, bots, t: 0, planeX: -2, plane: store.equipped('plane'), finishAt: null, results: false };
+  const me = { j: S.newJumper(h), x: 0, vx: 0, face: 1, openT: -1, phase: 0, look: equippedLook(), emo: store.equipped('emote'), bet, landed: false, rec: null };
+  G.round = { h, bet, me, bots, t: 0, planeX: -2, plane: store.equipped('plane'), finishAt: null, results: false, endList: null, endT: 0 };
   store.startRound(bet);
   G.state = 'fall'; G.watch = -1; G.camAlt = h; G.camX = 0; G.offA = 0; G.timeScale = 1; G.slow = 0; G.parts = []; G.trail = []; G.lines = []; G.acc = 0;
   G.lastMultInt = 1; G.trailT = 0; G.camX = 0;
@@ -78,6 +78,7 @@ function doOpen() {
   sfx.whump();
   if (!reduce) { G.slow = C.slowmoSecs; G.ease = 1; G.shake = Math.max(G.shake, 5); }
   $('mult').classList.add('locked');
+  const hb = highestBot(); if (hb >= 0) switchWatch(hb, false);
   setUI();
 }
 
@@ -119,14 +120,14 @@ function simStep(dt) {
     if (G.trailT <= 0) { G.trailT = 0.035; G.trail.push({ x: me.x, alt: me.j.y, t: 0, life: 0.9, id: store.equipped('trail') }); }
   }
   // end of round
-  if (me.j.landed && r.finishAt !== null && r.t >= r.finishAt && r.bots.every((b) => b.done) && !r.results) showResults();
+  if (me.j.landed && r.bots.every((b) => b.done) && !r.endList && !r.results) startEnding();
 }
 
 function onMeLanded() {
   const r = G.round, me = r.me, j = me.j;
   const out = S.outcome(j, r.bet);
   me.rec = { h: r.h, bet: r.bet, win: out.win, mult: out.mult, payout: out.payout, opened: j.opened, openAlt: j.openAlt, landSpeed: j.landSpeed };
-  me.landed = true; me.crashed = !out.win;
+  me.landed = true; me.crashed = !out.win; r.meLandT = r.t;
   G.state = 'landed';
   const sx = W / 2, sy = anchorY + 0;
   if (out.win) {
@@ -182,7 +183,10 @@ function coins(n) {
 }
 function dust(wx, alt, n) {
   const r = G.round; if (!r) return;
-  const x = W / 2 + (wx - G.camX) * pxm; const y = anchorY + (G.camAlt - alt) * pxm;
+  const x = W / 2 + (wx - G.camX) * pxx; const y = anchorY + (G.camAlt - alt) * pxm;
+  dustAt(x, y, n);
+}
+function dustAt(x, y, n) {
   for (let i = 0; i < (reduce ? Math.ceil(n / 3) : n); i++) {
     const a = Math.PI + Math.random() * Math.PI, sp = 40 + Math.random() * 160;
     G.parts.push({ k: 'dust', x, y: y - 4, vx: Math.cos(a) * sp * (Math.random() < .5 ? -1 : 1), vy: Math.sin(a) * sp * 0.7, g: 120, life: 0, max: 0.7 + Math.random() * 0.5, r: 6 + Math.random() * 10 });
@@ -294,7 +298,7 @@ function poseOf(e, r) {
   return Math.floor(r.t * (3 + 7 * j.v / C.terminalSpeed) + e.phase) % 2 ? 'fall_a' : 'fall_b';
 }
 function drawEntity(e, isMe, r) {
-  const j = e.j, x = W / 2 + (e.x - G.camX) * pxm; const pose = poseOf(e, r);
+  const j = e.j, x = W / 2 + (e.x - G.camX) * pxx; const pose = poseOf(e, r);
   let y = altSy(j.y);
   const landedBad = j.landed && (isMe ? e.crashed : (e.result && !e.result.win));
   const foot = (pose === 'crash' ? 0.95 : pose === 'fall_a' || pose === 'fall_b' ? 0.45 : 0.98) * mpp;
@@ -321,9 +325,78 @@ function drawEntity(e, isMe, r) {
   ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(label, lx, ly + 3);
 }
 
+
+// ---------------------------------------------------------------- off-screen arrows
+function drawArrows(r) {
+  const list = [r.me, ...r.bots].filter((e) => !e.j.landed);
+  const padX = 24, padT = 118, padB = 118; const cx = W / 2, cy = H / 2; const used = [];
+  ctx.font = '700 11px -apple-system, sans-serif'; ctx.textAlign = 'center';
+  for (const e of list) {
+    const sx = W / 2 + (e.x - G.camX) * pxx, sy = altSy(e.j.y);
+    if (sx > -8 && sx < W + 8 && sy > -24 && sy < H + 24) continue;
+    const isMe = e === r.me; let dx = sx - cx, dy = sy - cy; const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
+    const t = Math.min(dx ? (cx - padX) / Math.abs(dx) : 1e9, dy ? (dy < 0 ? cy - padT : H - padB - cy) / Math.abs(dy) : 1e9);
+    const ax = cx + dx * t, ay = cy + dy * t, ang = Math.atan2(dy, dx);
+    ctx.save(); ctx.translate(ax, ay); ctx.rotate(ang);
+    ctx.fillStyle = isMe ? '#E8461A' : '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(11, 0); ctx.lineTo(-7, -8); ctx.lineTo(-3, 0); ctx.lineTo(-7, 8); ctx.closePath(); ctx.stroke(); ctx.fill(); ctx.restore();
+    const label = (isMe ? 'YOU' : e.name) + '  ' + fmt(e.j.y) + ' m'; const tw = ctx.measureText(label).width + 12;
+    let lx = clamp(ax - dx * (tw / 2 + 16), tw / 2 + 4, W - tw / 2 - 4), ly = clamp(ay - dy * 22, 100, H - 100);
+    for (let k = 0; k < 8 && used.some((u) => Math.abs(u.x - lx) < (u.w + tw) / 2 && Math.abs(u.y - ly) < 19); k++) ly += (dy < 0 ? 1 : -1) * 20;
+    used.push({ x: lx, y: ly, w: tw });
+    ctx.fillStyle = isMe ? '#E8461A' : 'rgba(0,0,0,.55)'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(lx - tw / 2, ly - 9, tw, 18, 9) : ctx.rect(lx - tw / 2, ly - 9, tw, 18); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillText(label, lx, ly + 4);
+  }
+}
+
+// ---------------------------------------------------------------- ending: everyone on the ground in one wide shot
+function startEnding() {
+  const r = G.round; endMode = true; layout();
+  G.state = 'ending'; G.timeScale = 1; G.slow = 0; G.watch = -1; G.parts = []; G.lines = []; G.trail = []; G.camAlt = 0; G.camX = 0; G.offA = 0;
+  sfx.stopAll();
+  const all = [r.me, ...r.bots]; all.sort((a, b) => a.x - b.x);
+  r.endList = all.map((e) => ({ e, crashed: e === r.me ? !!e.crashed : !e.result.win, puffs: 0 }));
+  r.endT = 0; if (r.endList.some((i) => i.crashed) && !reduce) G.shake = Math.max(G.shake, 10);
+  setUI();
+}
+const EMO_FPS = { wave: 5, dance: 5, flex: 3, salute: 2, pump: 4, dab: 3, flip: 6, sit: 2 };
+function emoXform(k, T, m) {
+  if (k === 'dance') return { dy: -Math.abs(Math.sin(T * 7)) * 0.14 * m, rot: Math.sin(T * 7) * 0.07 };
+  if (k === 'pump') return { dy: -Math.abs(Math.sin(T * 6)) * 0.18 * m, rot: 0 };
+  if (k === 'flip') { const p = (T % 1.5) / 1.5; if (p < 0.5) { const q = p / 0.5; return { dy: -Math.sin(Math.PI * q) * 1.5 * m, rot: -q * Math.PI * 2, air: true }; } return { dy: 0, rot: 0 }; }
+  return { dy: 0, rot: 0 };
+}
+function drawEnding(r) {
+  const list = r.endList, n = list.length, T = r.endT, gy = anchorY;
+  const sc0 = clamp((W / (n + 0.6)) / cell * 2.6, 0.75, 1.9), rowGap = Math.min(70, H * 0.075);
+  for (const row of [0, 1]) list.forEach((it, i) => {
+    if (i % 2 !== row) return;
+    const e = it.e, x = W * (i + 1) / (n + 1), sc = sc0 * (row ? 1 : 0.94), m = mpp * sc, c = cell * sc, y0 = gy + 6 + row * rowGap;
+    if (it.crashed) {
+      ctx.fillStyle = 'rgba(40,26,16,.5)'; ctx.beginPath(); ctx.ellipse(x, y0 + 1, 1.0 * m, 0.24 * m, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#5a3d26'; ctx.beginPath(); ctx.ellipse(x, y0 + 2, 0.75 * m, 0.2 * m, 0, 0, 7); ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.rect(x - 2 * m, y0 - 4 * m, 4 * m, 4 * m + 1); ctx.clip();
+      art.diver(ctx, x, y0 - 0.95 * m + 0.75 * m, c, e.look.suit, e.look.helmet, 'crash', e.face || 1, 0); ctx.restore();
+      ctx.fillStyle = '#5a3d26'; ctx.beginPath(); ctx.ellipse(x - 0.5 * m, y0 + 1, 0.3 * m, 0.1 * m, 0, 0, 7); ctx.ellipse(x + 0.55 * m, y0 + 1, 0.25 * m, 0.09 * m, 0, 0, 7); ctx.fill();
+      // dust: a burst on impact, then a few drifting puffs
+      const want = Math.min(5, Math.floor(T / 0.45) + 1); while (it.puffs < want) { dustAt(x, y0, it.puffs === 0 ? 30 : 12); it.puffs++; }
+    } else {
+      const k = (e.emo || 'emote_wave').slice(6), fps = EMO_FPS[k] || 4; let ph = Math.floor(T * fps + i) % 2 ? 'b' : 'a';
+      const xf = emoXform(k, T + i * 0.37, m); if (k === 'flip' && xf.air) ph = 'b';
+      let pose = `emo_${k}_${ph}`; if (!art.get(`diver_${e.look.suit}_${pose}`)) pose = 'land';
+      art.diver(ctx, x, y0 - 0.98 * m + xf.dy, c, e.look.suit, e.look.helmet, pose, e.face || 1, xf.rot);
+      ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(x, y0 + 1, 0.6 * m, 0.12 * m, 0, 0, 7); ctx.fill();
+    }
+    const label = e === r.me ? 'YOU' : e.name; ctx.font = '700 10.5px -apple-system, sans-serif'; ctx.textAlign = 'center';
+    const tw = ctx.measureText(label).width + 10, ly = y0 - 2.3 * m - 8;
+    ctx.fillStyle = e === r.me ? '#E8461A' : 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x - tw / 2, ly - 8, tw, 16, 8) : ctx.rect(x - tw / 2, ly - 8, tw, 16); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillText(label, x, ly + 3.5);
+  });
+}
+
 function drawPlane(r) {
   const im = art.get('plane_' + r.plane.replace('plane_', '')); if (!im) return;
-  const px = W / 2 + (r.planeX + r.t * 24 - G.camX) * pxm, py = altSy(r.h + 0.5);
+  const px = W / 2 + (r.planeX + r.t * 24 - G.camX) * pxx, py = altSy(r.h + 0.5);
   const w = cell * 1.9; ctx.drawImage(im, px - w / 2, py - w / 4 - cell * 0.1, w, w / 2);
 }
 
@@ -377,6 +450,8 @@ function render(dt) {
     const im = art.get(store.equipped('plane')); const w = cell * 2.2; const px = W / 2 + Math.sin(G.t * 0.25) * W * 0.12, py = H * 0.3 + Math.sin(G.t * 0.8) * 6;
     if (im) ctx.drawImage(im, px - w / 2, py - w / 4, w, w / 2);
     cloudsAndBirds(true);
+  } else if (r.endList) {
+    drawGround(bg); drawEnding(r); drawParts(dt);
   } else {
     drawGround(bg);
     drawPlane(r);
@@ -386,6 +461,7 @@ function render(dt) {
     cloudsAndBirds(true);
     speedLines(dt, G.state === 'result' ? 0 : (f.j.opened ? f.j.v * 0.4 : v));
     drawParts(dt);
+    drawArrows(r);
   }
   ctx.restore();
 }
@@ -400,7 +476,8 @@ function heat(m) {
 function frame(now) {
   const real = Math.min(0.1, (now - (G.last || now)) / 1000); G.last = now; G.t += real;
   const r = G.round;
-  if (r && G.state !== 'idle' && G.state !== 'result') {
+  if (r && r.endList) { r.endT += real; if (G.state === 'ending' && r.endT >= C.endHold) showResults(); }
+  if (r && G.state !== 'idle' && G.state !== 'result' && G.state !== 'ending') {
     // time scale: slow motion beat, fast forward after you land
     let ts = 1;
     if (G.slow > 0) { G.slow -= real; ts = G.slow > 0.15 ? C.slowmoScale : lerp(1, C.slowmoScale, clamp(G.slow / 0.15, 0, 1)); }
@@ -423,11 +500,15 @@ function frame(now) {
     G.camX += (f.x - G.camX) * k;
     G.offA *= Math.exp(-real * 7);
     G.camAlt = f.j.y + G.offA;
+    if (r && r.endList) { G.camAlt = 0; G.camX = 0; G.offA = 0; }
   } else { G.camAlt = 900; G.camX += real * 2; }
   G.ease = Math.max(0, G.ease - real / 0.7);
   G.shake *= Math.exp(-real * 6);
   // spectate auto-switch
-  if (r && G.watch >= 0 && r.bots[G.watch].done) { switchWatch(nextWatch(G.watch), false); }
+  if (r && !r.endList) {
+    if (G.watch >= 0 && r.bots[G.watch].done) switchWatch(highestBot(), false);
+    else if (G.watch < 0 && r.me.j.landed && !r.autoGo && r.t > r.meLandT + 1.0) { r.autoGo = true; const hb = highestBot(); if (hb >= 0) switchWatch(hb, false); }
+  }
   render(real);
   hud(real);
   requestAnimationFrame(frame);
@@ -479,6 +560,9 @@ function hud(dt) {
 }
 
 // ---------------------------------------------------------------- spectate
+function airList() { const r = G.round; if (!r) return []; const l = []; if (!r.me.j.landed) l.push(-1); r.bots.forEach((b, i) => { if (!b.done) l.push(i); }); return l; }
+function highestBot() { const r = G.round; let best = -1, y = -1; if (!r) return -1; r.bots.forEach((b, i) => { if (!b.done && b.j.y > y) { y = b.j.y; best = i; } }); return best; }
+function cycle(dir) { const l = airList(); if (l.length < 2) return; let k = l.indexOf(G.watch); if (k < 0) k = 0; switchWatch(l[(k + dir + l.length) % l.length]); sfx.click(); }
 function inflight() { const r = G.round; return r ? r.bots.map((b, i) => (b.done ? -1 : i)).filter((i) => i >= 0) : []; }
 function nextWatch(cur) { const l = inflight(); const nx = l.find((i) => i > cur); return nx === undefined ? -1 : nx; }
 function switchWatch(idx, userAction = true) {
@@ -494,10 +578,12 @@ function closePanel(el, cb) { el.classList.add('enter'); const done = () => { el
 function setUI() {
   const st = G.state, r = G.round;
   const idle = st === 'idle', fall = st === 'fall', chute = st === 'chute', landed = st === 'landed', res = st === 'result';
-  $('mult').classList.toggle('hide', idle);
+  const endg = st === 'ending';
+  $('mult').classList.toggle('hide', idle || endg);
   $('openbtn').classList.toggle('hide', !fall);
   $('driftpad').classList.toggle('hide', !(fall || chute));
-  $('botlist').classList.toggle('hide', idle);
+  $('botlist').classList.toggle('hide', idle || endg);
+  if (endg) $('watch').classList.add('hide');
   document.querySelector('.btns').classList.toggle('hide', !(idle || res));
   if (idle) { $('mult').classList.remove('locked'); $('watch').classList.add('hide'); $('botlist').innerHTML = ''; }
   if (fall) { $('watch').classList.add('hide'); }
@@ -506,10 +592,12 @@ function setUI() {
 }
 function updateButtons() {
   const st = G.state, l = inflight();
-  const canWatch = (st === 'chute' || st === 'landed') && l.length > 0;
+  const al = airList(); const canWatch = (st === 'chute' || st === 'landed') && al.length >= 2;
   $('specbtn').classList.toggle('hide', !canWatch);
-  if (canWatch) $('specbtn').textContent = G.watch < 0 ? 'Spectate' : (nextWatch(G.watch) < 0 ? 'Back to me' : 'Next bot');
+  if (canWatch) $('specbtn').textContent = 'Next player';
   $('skipbtn').classList.toggle('hide', !(st === 'landed' && l.length > 0));
+  const dp = $('driftpad'); dp.classList.toggle('hide', !(st === 'fall' || ((st === 'chute' || st === 'landed') && al.length >= 2)));
+  dp.firstElementChild.textContent = st === 'fall' ? 'Swipe or use arrow keys to drift' : 'Tap or arrow keys to switch player';
 }
 function renderTop() {
   const s = store.s.streak; $('streakchip').textContent = s >= 2 ? `Day ${s} streak` : '';
@@ -554,6 +642,7 @@ function jump() {
   $('watch').classList.add('hide');
 }
 function nextRound() {
+  endMode = false; layout();
   sfx.click();
   closePanel($('resp'), () => {
     G.state = 'idle'; G.round = null; G.watch = -1; G.parts = []; G.lines = []; G.trail = []; $('mult').classList.remove('locked');
@@ -587,10 +676,11 @@ function renderShop() {
     }
     card.appendChild(b); grid.appendChild(card);
     const sk = SKY(); const bgc = shopTab === 'bg' ? it.sky : null;
-    art.preview(c, shopTab, it.id, bgc);
+    art.preview(c, shopTab, it.id, bgc, { suit: store.equipped('suit'), helmet: store.equipped('helmet'), frame: 'a' });
     if (shopTab !== 'bg') c.style.background = shopTab === 'trail' ? '#26334f' : `linear-gradient(${sk.sky[0]},${sk.sky[1]})`;
   }
   $('grid').scrollTop = 0;
+  if (shopTab === 'emote' && !art.get('diver_suit_classic_emo_wave_a') && (G.emoTry = (G.emoTry || 0) + 1) < 8) setTimeout(() => { if (shopTab === 'emote' && !$('shop').classList.contains('hide')) renderShop(); }, 500);
 }
 function openShop() { renderShop(); openPanel($('shop')); }
 
@@ -620,8 +710,8 @@ function wire() {
   $('bet').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('bet').blur(); jump(); } e.stopPropagation(); });
   $('jump').onclick = jump; $('again').onclick = nextRound;
   $('openbtn').onclick = (e) => { e.stopPropagation(); doOpen(); };
-  $('specbtn').onclick = () => { sfx.click(); switchWatch(G.watch < 0 ? (inflight()[0] ?? -1) : nextWatch(G.watch)); };
-  $('skipbtn').onclick = () => { const r = G.round; if (!r) return; let n = 0; while (!r.bots.every((b) => b.done) && n++ < 6000) { for (const b of r.bots) if (!b.done) S.stepBot(b, 1 / 30); } r.t += 0; r.bots.forEach((b) => { if (b.done && !b.reported) { b.reported = true; } }); r.finishAt = r.t; showResults(); };
+  $('specbtn').onclick = () => cycle(1);
+  $('skipbtn').onclick = () => { const r = G.round; if (!r) return; let n = 0; while (!r.bots.every((b) => b.done) && n++ < 6000) { for (const b of r.bots) if (!b.done) S.stepBot(b, 1 / 30); } r.bots.forEach((b) => { b.reported = true; }); };
   $('btnshop').onclick = () => { if (G.state === 'idle' || G.state === 'result') openShop(); };
   $('shopx').onclick = () => { closePanel($('shop')); renderTop(); const b = $('bet'); if (G.state === 'idle') { buildChips(); checkBet(); } };
   $('btnrec').onclick = () => { if (G.state === 'idle' || G.state === 'result') { renderRecords(); openPanel($('rec')); } }; $('recx').onclick = () => closePanel($('rec'));
@@ -637,6 +727,7 @@ function wire() {
   const keys = {};
   addEventListener('keydown', (e) => {
     if (e.target && e.target.tagName === 'INPUT') return;
+    if ((G.state === 'chute' || G.state === 'landed') && ['ArrowLeft', 'ArrowRight', 'a', 'd'].includes(e.key)) { if (!e.repeat) cycle(e.key === 'ArrowLeft' || e.key === 'a' ? -1 : 1); return; }
     if (e.key === 'ArrowLeft' || e.key === 'a') { keys.l = 1; } else if (e.key === 'ArrowRight' || e.key === 'd') { keys.r = 1; }
     else if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); if (G.state === 'fall') doOpen(); else if (G.state === 'idle' && document.activeElement === document.body && !$('betp').classList.contains('hide')) jump(); }
     else if (e.key === 'Enter' && G.state === 'result') nextRound();
@@ -649,8 +740,8 @@ function wire() {
   // touch / mouse on the canvas: tap opens, swipe drifts
   let down = null;
   cv.addEventListener('pointerdown', (e) => { down = { id: e.pointerId, x: e.clientX, t: performance.now(), moved: false }; cv.setPointerCapture(e.pointerId); });
-  cv.addEventListener('pointermove', (e) => { if (!down || e.pointerId !== down.id) return; const dx = e.clientX - down.x; if (Math.abs(dx) > 12) down.moved = true; if (down.moved) G.input.touch = clamp(dx / 45, -1, 1); });
-  const up = (e) => { if (!down || e.pointerId !== down.id) return; if (!down.moved && performance.now() - down.t < 450 && G.state === 'fall') doOpen(); G.input.touch = 0; down = null; };
+  cv.addEventListener('pointermove', (e) => { if (!down || e.pointerId !== down.id) return; const dx = e.clientX - down.x; if (Math.abs(dx) > 12) down.moved = true; if (down.moved && G.state === 'fall') G.input.touch = clamp(dx / 45, -1, 1); });
+  const up = (e) => { if (!down || e.pointerId !== down.id) return; const dx = e.clientX - down.x; if (!down.moved && performance.now() - down.t < 450 && G.state === 'fall') doOpen(); else if (G.state === 'chute' || G.state === 'landed') cycle(down.moved && dx > 0 ? -1 : 1); G.input.touch = 0; down = null; };
   cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
   document.addEventListener('visibilitychange', () => { if (document.hidden) { G.input.key = 0; G.input.touch = 0; } });
   addEventListener('beforeunload', () => store.save());
@@ -662,6 +753,7 @@ async function boot() {
   const bar = document.querySelector('#loadbar i');
   try { await art.load((p) => { bar.style.width = Math.round(p * 100) + '%'; }); }
   catch (e) { G.error = String(e); console.error(e); }
+  art.loadEmotes();
   G.ready = true; $('loading').classList.add('done'); setTimeout(() => $('loading').remove(), 400);
   renderTop(); renderHistory(); setUI();
   if (store.abandoned) toast(`Last round was left unfinished. You lost the ${fmt(store.abandoned)} bet.`);

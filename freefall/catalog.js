@@ -41,6 +41,16 @@ export const CATALOG = {
     { id: 'trail_rainbow', name: 'Rainbow Rings', price: 16000 },
     { id: 'trail_stardust', name: 'Stardust', price: 28000 },
   ],
+  emote: [
+    { id: 'emote_wave', name: 'Wave', price: 0 },
+    { id: 'emote_salute', name: 'Salute', price: 2000 },
+    { id: 'emote_sit', name: 'Sit Down', price: 3500 },
+    { id: 'emote_pump', name: 'Fist Pump', price: 5000 },
+    { id: 'emote_dab', name: 'Dab', price: 8000 },
+    { id: 'emote_flex', name: 'Flex', price: 12000 },
+    { id: 'emote_dance', name: 'Dance', price: 17000 },
+    { id: 'emote_flip', name: 'Backflip', price: 25000 },
+  ],
   bg: [
     { id: 'bg_day', name: 'Sunny Day', price: 0, sky: ['#4f9be8', '#cfe6f7'], fog: '#cfe6f7', light: 1.0 },
     { id: 'bg_dusk', name: 'Sunset', price: 3000, sky: ['#3b2a6b', '#ff9a5a'], fog: '#e0906a', light: 0.8 },
@@ -51,6 +61,6 @@ export const CATALOG = {
   ],
 };
 export const CATEGORIES = [
-  ['chute', 'Parachutes'], ['suit', 'Suits'], ['helmet', 'Helmets'], ['plane', 'Planes'], ['trail', 'Trails'], ['bg', 'Skies'],
+  ['chute', 'Parachutes'], ['suit', 'Suits'], ['helmet', 'Helmets'], ['emote', 'Emotes'], ['plane', 'Planes'], ['trail', 'Trails'], ['bg', 'Skies'],
 ];
 export const find = (cat, id) => CATALOG[cat].find((i) => i.id === id);

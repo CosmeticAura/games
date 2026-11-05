@@ -53,6 +53,8 @@ export class Store {
         s.best.rounds = old.rounds || 0;
       }
     }
+    if (!s.owned.includes('emote_wave')) s.owned.push('emote_wave');
+    s.equipped = { emote: 'emote_wave', ...s.equipped };
     s.settings = { reduce: null, sound: true, theme: 'system', ...(s.settings || {}) };
     if (s.pending > 0) { this.abandoned = s.pending; s.pending = 0; s.curWin = 0; }
     this.s = s;
