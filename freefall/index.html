@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#4f9be8">
+<title>Freefall</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="flash"></div>
+
+<div id="hud">
+  <div id="topbar">
+    <div id="bal"><span class="lbl">Tokens</span><b id="balv">0</b><i id="streakchip"></i></div>
+    <div class="btns">
+      <button id="btnshop" class="pill">Shop</button>
+      <button id="btnrec" class="pill">Records</button>
+      <button id="btnset" class="pill">Settings</button>
+    </div>
+  </div>
+  <div id="histwrap"><span class="lbl">Last jumps, m</span><div id="hist"></div></div>
+  <div id="mult" class="hide">1.00x</div>
+  <div id="watch" class="hide"></div>
+  <div id="pops"></div>
+  <div id="botlist"></div>
+</div>
+
+<div id="bottombar">
+  <button id="specbtn" class="pill hide">Spectate</button>
+  <button id="skipbtn" class="pill hide">Skip to results</button>
+  <button id="openbtn" class="big hide">Open chute<small>tap anywhere, or press space</small></button>
+  <div id="driftpad" class="hide"><span>Swipe or use arrow keys to drift</span></div>
+</div>
+
+<section id="betp" class="sheet">
+  <h1>Freefall</h1>
+  <p class="sub">You jump from a hidden height. The multiplier climbs 1.00x per 100 m. Open late to win big, but you have to land under 7 m/s.</p>
+  <label for="bet">Your bet</label>
+  <div class="stepper"><button id="betminus" class="round" aria-label="Lower bet">-</button><input id="bet" type="text" inputmode="numeric" autocomplete="off" value="500"><button id="betplus" class="round" aria-label="Raise bet">+</button></div>
+  <div id="chips"></div>
+  <div id="beterr"></div>
+  <button id="jump" class="big">Jump</button>
+</section>
+
+<section id="resp" class="sheet hide">
+  <h2 id="restitle">Landed</h2>
+  <p id="ressub" class="sub"></p>
+  <div id="resbig"></div>
+  <div id="restbl"></div>
+  <button id="again" class="big">Next round</button>
+</section>
+
+<section id="shop" class="page hide">
+  <header><h2>Shop</h2><span id="shopbal"></span><button id="shopx" class="pill">Done</button></header>
+  <nav id="tabs"></nav>
+  <div id="grid"></div>
+</section>
+
+<section id="rec" class="page hide">
+  <header><h2>Records</h2><span></span><button id="recx" class="pill">Done</button></header>
+  <div id="recbody"></div>
+</section>
+
+<section id="set" class="sheet hide">
+  <h2>Settings</h2>
+  <div class="row"><span>Reduce motion</span><button id="setreduce" class="toggle" role="switch" aria-checked="false"></button></div>
+  <div class="row"><span>Sound</span><button id="setsound" class="toggle" role="switch" aria-checked="true"></button></div>
+  <div class="row"><span>Appearance</span><div class="seg" id="settheme"><button data-v="system">System</button><button data-v="light">Light</button><button data-v="dark">Dark</button></div></div>
+  <button id="setx" class="big">Done</button>
+</section>
+
+<section id="claim" class="modal hide">
+  <div class="card">
+    <h2>Daily bonus</h2>
+    <div id="claimamt">+10,000</div>
+    <p id="claimsub" class="sub"></p>
+    <button id="claimbtn" class="big">Claim</button>
+  </div>
+</section>
+
+<div id="toast" class="hide"></div>
+<div id="loading"><b>Freefall</b><div id="loadbar"><i></i></div></div>
+<script type="module" src="main.js"></script>
+</body>
+</html>
