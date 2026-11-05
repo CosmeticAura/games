@@ -46,7 +46,8 @@ export const CONFIG = {
   // some bots watch the altimeter and open this far above the ground instead
   botAwareShare: 0.03,
   botAwareAlt: [250, 700],
-  botNames: ['Maverick', 'Skye', 'Dash', 'Nova', 'Ripley', 'Blaze', 'Echo', 'Jett', 'Pixel', 'Orion', 'Zuzu', 'Kestrel'],
+  botNames: ['Skye', 'Blaze', 'Echo', 'Dash', 'Maverick', 'Jett', 'Orion', 'Ripley', 'Kestrel', 'Nova'],  // each has a fixed style in bots.js
+  botSwapChance: 0.18,     // chance a bot plays another style for the next 1 or 2 rounds
 
   // view and feel
   viewPxPerM: 0.0036,      // screen height * this = pixels per metre

@@ -80,25 +80,3 @@ export function randomHeight(rnd = Math.random, prev = null) {
   }
   return prev > 1300 ? C.minHeight + 50 : C.maxHeight - 50;
 }
-
-// ---- bots ----
-export function makeBot(name, height, rnd = Math.random) {
-  const aware = rnd() < C.botAwareShare;
-  const m = pick(C.botOpenMix, rnd);
-  const openFallen = m.lo + rnd() * (m.hi - m.lo);
-  const [alo, ahi] = C.botAwareAlt;
-  const awareAlt = alo + rnd() * (ahi - alo);
-  const balance = C.botBalance[0] + rnd() * (C.botBalance[1] - C.botBalance[0]);
-  const share = C.botBetMin + rnd() * (C.botBetMax - C.botBetMin);
-  const bet = Math.max(C.minBet, Math.round(balance * share / 10) * 10);
-  return { name, aware, bet, openFallen, awareAlt, j: newJumper(height), done: false, result: null };
-}
-
-export function stepBot(b, dt) {
-  const j = b.j;
-  if (!j.opened && !j.landed) {
-    if (b.aware ? j.y <= b.awareAlt : j.fallen >= b.openFallen) open(j);
-  }
-  step(j, dt);
-  if (j.landed && !b.done) { b.done = true; b.result = outcome(j, b.bet); }
-}

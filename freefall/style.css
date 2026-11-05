@@ -149,7 +149,7 @@ input[type=range] { flex: 1; accent-color: var(--orange); }
 #plist { display: flex; flex-direction: column; gap: 4px; }
 .prow { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border: 1px solid var(--c2); border-radius: 4px; background: var(--c1); }
 .prow.on { border-color: var(--gold); }
-#toast { position: fixed; z-index: 60; left: 50%; top: calc(14px + var(--safe-t)); transform: translateX(-50%); background: var(--c1); border: 1px solid var(--gold); padding: 8px 14px; border-radius: 4px; }
+#toast { position: fixed; z-index: 60; left: 50%; top: calc(108px + var(--safe-t)); transform: translateX(-50%); background: var(--c1); border: 1px solid var(--gold); padding: 8px 14px; border-radius: 4px; }
 
 /* right panel */
 #panel { width: 272px; flex: none; background: var(--c1); border-left: 1px solid var(--gold); position: relative; z-index: 15; overflow-y: auto; }
@@ -163,7 +163,7 @@ input[type=range] { flex: 1; accent-color: var(--orange); }
 #paneltab { display: none; }
 
 @media (max-width: 760px) {
-  #panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(290px, 82vw); transform: translateX(100%); transition: transform .22s ease; overflow: visible; }
+  #panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(290px, 82vw); transform: translateX(100%); transition: transform .3s cubic-bezier(.2, .8, .2, 1); overflow: visible; }
   #panel .pbody { height: 100%; overflow-y: auto; padding-top: calc(12px + var(--safe-t)); }
   #panel.open { transform: translateX(0); }
   #paneltab { display: flex; align-items: center; justify-content: center; position: absolute; left: -26px; top: 42%; width: 26px; height: 84px; background: var(--c1); border: 1px solid var(--gold); border-right: 0; border-radius: 4px 0 0 4px; color: var(--gold); }
@@ -177,3 +177,59 @@ input[type=range] { flex: 1; accent-color: var(--orange); }
 #driftpad span { background: rgba(10, 10, 12, .62); color: var(--cream); padding: 3px 10px; border-radius: 3px; }
 #histwrap { background: rgba(10, 10, 12, .5); padding: 2px 6px; border-radius: 3px; }
 #histwrap em { opacity: .9; }
+
+/* v5 motion. Timings: press 100 ms, reveals 150-250 ms, panels 300 ms, screen changes 400 ms. Ease out in, never linear. */
+button { transition: transform .1s ease-out, background-color .12s, border-color .12s; }
+button:active:not([disabled]) { transform: scale(.96); }
+.big:active:not([disabled]) { transform: translateY(2px) scale(.985); }
+#paneltab:active { transform: none; }
+@keyframes sheetIn { from { opacity: 0; transform: translate(-50%, calc(-50% + 18px)); } to { opacity: 1; transform: translate(-50%, -50%); } }
+@keyframes resIn { from { opacity: 0; transform: translate(-50%, 46px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes pageIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes rowIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.sheet:not(.hide) { animation: sheetIn .3s cubic-bezier(.2, .8, .2, 1); }
+#resp { top: auto; bottom: 14px; transform: translate(-50%, 0); max-height: 56%; }
+#resp:not(.hide) { animation: resIn .4s cubic-bezier(.2, .8, .2, 1); }
+#restbl .r { animation: rowIn .24s ease-out both; }
+.page:not(.hide) { animation: pageIn .3s cubic-bezier(.2, .8, .2, 1); }
+html.reduce .sheet:not(.hide), html.reduce #resp:not(.hide), html.reduce .page:not(.hide) { animation: fadeIn .2s ease-out; }
+html.reduce #restbl .r { animation: fadeIn .2s ease-out both; }
+html.reduce button:active:not([disabled]) { transform: none; }
+html.reduce #panel { transition: none; }
+@media (prefers-reduced-motion: reduce) { html:not(.reduce) .sheet:not(.hide), html:not(.reduce) .page:not(.hide) { animation: fadeIn .2s ease-out; } }
+
+/* smooth lists */
+.sheet, .page, #restbl, #panel, #recbody, #plist { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+#tabs { scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+#tabs button { scroll-snap-align: center; }
+.carwrap { position: relative; }
+.car { scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; overflow-x: auto; scrollbar-width: none; outline: none; }
+.car::-webkit-scrollbar { display: none; }
+#faces.car, #suits.car, #grid.car { display: flex; gap: 12px; grid-template-columns: none; padding-block: 16px; }
+#faces.car { padding-inline: calc(50% - 32px); } #suits.car { padding-inline: calc(50% - 38px); } #grid.car { padding-inline: calc(50% - 80px); }
+.car > * { flex: none; scroll-snap-align: center; transform: scale(var(--s, 1)); transition: transform .12s ease-out; }
+#faces.car > .pick { width: 64px; } #suits.car > .pick { width: 76px; } #grid.car > .item { width: 160px; }
+.car:focus-visible { outline: 1px solid var(--gold); outline-offset: -2px; }
+.cararrow { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .cararrow { display: flex; position: absolute; top: 50%; transform: translateY(-50%); z-index: 3; width: 28px; height: 44px; align-items: center; justify-content: center; background: var(--c1); border: 1px solid var(--gold); border-radius: 3px; }
+  .cararrow:active { transform: translateY(-50%) scale(.94); }
+  .cararrow.l { left: 0; } .cararrow.r { right: 0; }
+}
+html.reduce .car > * { transition: none; }
+
+/* level bar */
+#lvl { font-size: 11px; align-self: center; }
+#lvlbar { display: inline-block; width: 44px; height: 4px; background: var(--c2); border-radius: 2px; overflow: hidden; align-self: center; }
+#lvlbar i { display: block; height: 100%; width: 0; background: var(--orange); transition: width .4s ease-out; }
+#firsthint { text-align: center; }
+#themesel { background: var(--c1); color: var(--cream); border: 1px solid var(--gold); border-radius: 3px; padding: 6px 8px; font: inherit; width: 100%; }
+#bal { flex-wrap: wrap; row-gap: 3px; }
+#lvlrow { flex-basis: 100%; display: flex; gap: 6px; align-items: center; }
+#lvlbar { flex: 1; width: auto; }
+@media (min-width: 761px) {
+  #resp { left: calc(50% - 136px); }          /* centre on the game, not under the side panel */
+  #grid.car { padding-inline: 44px; }
+}
+#grid.car { gap: 20px; }
