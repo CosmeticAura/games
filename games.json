@@ -3,14 +3,11 @@
     "slug": "freefall",
     "title": "Freefall",
     "blurb": "Jump from a height you can't see and open your chute as late as you dare. The multiplier climbs all the way down, and a crash costs your whole bet.",
-    "tags": ["betting", "bots", "shop"],
+    "tags": [
+      "betting",
+      "bots",
+      "shop"
+    ],
     "added": "2026-11-05"
-  },
-  {
-    "slug": "tapper",
-    "title": "Tapper",
-    "blurb": "Ten seconds, one button. Tap as fast as you can and beat your best score.",
-    "tags": ["quick"],
-    "added": "2026-11-04"
   }
 ]

@@ -7,11 +7,10 @@ Small browser games by CosmeticAura. They run on phones and laptops, need no ins
 | Game | What it is |
 | --- | --- |
 | [Freefall](https://cosmeticaura.github.io/games/freefall/) | Jump from a height you can't see and open your chute as late as you dare. The multiplier climbs all the way down, and a crash costs your whole bet. Play tokens only. |
-| [Tapper](https://cosmeticaura.github.io/games/tapper/) | Ten seconds, one button. Tap as fast as you can and beat your best score. |
 
 ## Controls
 
-Freefall: space or tap to open the chute, arrow keys or swipe to drift. Tapper: tap the button.
+Space or tap to open the chute, arrow keys or swipe to drift.
 
 ## Run it yourself
 
@@ -31,7 +30,6 @@ Then open http://localhost:8000.
 index.html     the game list
 games.json     titles and descriptions shown on the list
 freefall/      one folder per game
-tapper/
 ```
 
 ## License
