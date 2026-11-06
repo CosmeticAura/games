@@ -233,3 +233,17 @@ html.reduce .car > * { transition: none; }
   #grid.car { padding-inline: 44px; }
 }
 #grid.car { gap: 20px; }
+
+/* v6 motion: result number pop, crash jolt, hover lift, key hint */
+@keyframes pop { 0% { transform: scale(.7); opacity: 0; } 55% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1); } }
+@keyframes jolt { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-6px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
+#resbig.win { animation: pop .5s cubic-bezier(.2, .8, .2, 1) .15s both; }
+#resbig.lose { animation: jolt .4s ease-out .15s both; }
+.pill, .big { transition: transform .12s ease-out, box-shadow .12s ease-out, background-color .12s, border-color .12s; }
+@media (hover: hover) and (pointer: fine) {
+  .big:hover:not([disabled]) { transform: translateY(-1px); box-shadow: 0 4px 0 var(--ink); }
+  .pill:hover:not([disabled]) { transform: translateY(-1px); }
+  #jump::after, #again::after, #claimbtn::after, #playbtn::after { content: 'Space'; font-size: 11px; font-weight: 500; opacity: .7; letter-spacing: .06em; text-transform: uppercase; }
+}
+html.reduce #resbig.win, html.reduce #resbig.lose { animation: fadeIn .2s ease-out both; }
+@media (prefers-reduced-motion: reduce) { html:not(.reduce) #resbig.win, html:not(.reduce) #resbig.lose { animation: fadeIn .2s ease-out both; } }

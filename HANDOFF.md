@@ -1,4 +1,4 @@
-# Casino handoff (2026-11-05, from the AI Optimize chat)
+# Casino handoff (updated 2026-11-06, from the AI Optimize chat)
 
 Read this first in any new casino chat. Then read the files it points to; don't redo what's listed as done.
 
@@ -13,13 +13,18 @@ Hector's browser casino of small games, play tokens only, one shared profile, wa
 - Rules for the bots: `~/AI Everything/🤖 AI & Agents/Hermes setup/ASK_FROM_ANYWHERE.md` (quick lane, publish games with publish.sh, text the https github.io link).
 
 ## Status
-- v3 is live (shorter rounds, spectating, edge arrows, ground ending, emotes).
-- v4 (accounts with avatars, saving fix, reset to 0 with daily 10,000, risk based multiplier with 8% edge, varied round heights, auto spectate, crash ends your round at once, round ends when the last free faller lands, right panel with round leaderboard and diver preview, new sounds, Ink night look, themes.js, interface shop, shared casino modules) was built by Atlas. Hector tested it on his phone and liked the look.
-- v5 polish was sent to Atlas around 3:50 PM but lost in a gateway restart. Hector is resending it: smooth snap scrolling for faces and cosmetics, smooth round end transition (no instant menu), more fall and UI animation, bot personality system, apply the whole casino-game-design skill. Check whether Atlas started it before sending anything new.
+- PAUSED by Hector on 2026-11-05 so the Cosmetics loop gets the weekly budget. Then he changed his mind: Atlas finishes the v5 polish step it was on, publishes it with publish.sh, saves notes to Playground/freefall, and starts nothing else on the casino until Hector says go.
+- Live and published: v4 plus fixes (last site commit a4f18a9 "Update freefall"; Playground/freefall files last changed 2026-11-05 21:35). v4 = accounts with avatars, saving fix, reset to 0 with daily 10,000, risk based multiplier with 8% edge, varied round heights, auto spectate, crash ends your round at once, round ends when the last free faller lands, right panel with round leaderboard and diver preview, new sounds, Ink night look, themes.js, interface shop, shared casino modules.
+- v5 polish (asked of Atlas): smooth snap scrolling for faces and cosmetics, smooth round end transition (no instant menu), more fall and UI animation, bot personality system, apply the whole casino-game-design skill. Not confirmed finished. First step in a new chat: compare `git log` in this folder and the newest files in Playground/freefall against the list above, run the tests in Playground/freefall/tests and Playground/shared/tests, then open the live site and check each v5 item by eye.
+- Tapper was removed. Freefall is the only game.
 
-## Next
+## Next (only after Hector says go)
 1. Playtest v5, turn feedback into a short message for Atlas and a LESSONS.md line.
-2. Then new games, in order: Mines, Plinko, Blackjack, Lantern race (details in ECONOMY.md section 7), and a casino lobby page once there are two games.
+2. New games in order: Mines, Plinko, Blackjack, Lantern race (details in ECONOMY.md section 7), then a casino lobby page once there are two games.
+3. Keep every game on the shared modules (profile.js, wallet.js, shop.js, themes.js, catalog.json) so tokens, cosmetics and themes carry over.
+
+## Disk
+The Mac mini is short on space (about 30 GB free). This project is small (Playground 12 MB, site clone 20 MB), so keep it local. Do not add large video or audio files here.
 
 ## How Hector works here
 - He texts Atlas (iMessage, contact named "Claude") or the chat gives him a paste ready message. Keep messages short and point Atlas at files instead of pasting long briefs; Atlas's long sessions fill up fast.

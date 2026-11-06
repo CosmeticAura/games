@@ -25,7 +25,7 @@ export const CONFIG = {
   groundVisibleM: 30,      // the ground only shows this close, about 0.2 s at top speed: too late to react
 
   // bets and tokens
-  minBet: 10,
+  minBet: 100, // same as the shared wallet; the wallet value is the one the game uses
   dailyBonus: 10000,
   streakExtra: 500,
   streakExtraMax: 5000,

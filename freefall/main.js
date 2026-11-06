@@ -321,7 +321,7 @@ function showResults() {
   const r = G.round, me = r.me, o = me.out; G.state = 'result';
   $('restitle').textContent = o.win ? 'Landed' : 'Crashed';
   $('ressub').textContent = o.win ? `Opened after ${fmt(me.j.openFallen)} m of ${fmt(r.h)}. Multiplier x${o.mult.toFixed(2)}.` : `Jump from ${fmt(r.h)} m. The bet is gone.`;
-  const big = $('resbig'); big.className = 'mono ' + (o.win ? 'win' : 'lose'); rollTo(big, o.win ? o.payout : me.bet, o.win ? '+' : '-');
+  const big = $('resbig'); big.className = 'mono ' + (o.win ? 'win' : 'lose'); const net = o.win ? o.payout - me.bet : -me.bet; big.className = 'mono ' + (net >= 0 ? 'win' : 'lose'); rollTo(big, Math.abs(net), net >= 0 ? '+' : '-');
   const t = $('restbl'); t.textContent = '';
   const rows = r.players.slice().sort((a, b) => (b.out.net) - (a.out.net));
   for (const p of rows) {
@@ -355,11 +355,18 @@ window.addEventListener('pointerup', () => {
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') { if (e.key === 'Enter' && e.target.id === 'bet') $('jump').click(); if (e.key === 'Enter' && e.target.id === 'uname') $('playbtn').click(); return; }
   if (G.state === 'fall') {
-    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (!meDone()) doOpen(); }
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (!meDone()) doOpen(); else if (!$('skipbtn').classList.contains('hide')) $('skipbtn').click(); }
     const d = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
     if (d) { e.preventDefault(); if (meDone()) cycle(d); else { G.keys = d; G.drift = d; } }
-  } else if (G.state === 'idle' && e.key === 'Enter' && !$('betp').classList.contains('hide')) $('jump').click();
+  } else if ((e.key === ' ' || e.key === 'Enter') && e.target.tagName !== 'BUTTON' && !e.repeat) {
+    // Space or Enter presses the one big button on screen and moves on
+    if (['shop', 'recp', 'setp'].some((id) => !$(id).classList.contains('hide'))) return;
+    const big = ['claimp', 'resp', 'startp', 'betp'].map((id) => $(id)).filter((el) => !el.classList.contains('hide')).map((el) => el.querySelector('.big:not([disabled])')).find(Boolean);
+    if (big) { e.preventDefault(); big.click(); }
+  }
 });
+// mouse clicks should not leave a button focused, or Space would press it again
+document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('button'); if (b && e.detail) b.blur(); });
 window.addEventListener('keyup', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { G.keys = 0; G.drift = 0; } });
 $('openbtn').onclick = () => doOpen();
 $('specprev').onclick = () => cycle(-1);
